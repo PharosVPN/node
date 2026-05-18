@@ -1,0 +1,170 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 The PharosVPN Authors
+
+syntax = "proto3";
+
+// Package pharos.buoy.v1 is the buoy node control contract. helm is the gRPC
+// client; the buoy node is the server. helm dials out over mTLS — the node
+// opens no connection to helm (DESIGN §2, §6, §7).
+package pharos.buoy.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// NodeControl is the control-plane service every buoy node exposes to helm.
+//
+// RPCs are unified across data-plane protocols: each request carries a
+// Protocol field rather than the service offering per-protocol RPCs. Adding a
+// protocol is a new Protocol enum value, not a schema break (DESIGN §11,
+// decision 14 follow-up).
+service NodeControl {
+  // GetStatus reports node and per-protocol service health.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+
+  // GetMetrics reports counters for metrics sampling.
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+
+  // PushConfig replaces the data-plane config for one protocol and reloads it.
+  rpc PushConfig(PushConfigRequest) returns (PushConfigResponse);
+
+  // AddPeer adds a single peer live, without restarting the data plane.
+  rpc AddPeer(AddPeerRequest) returns (PeerResponse);
+
+  // RemovePeer revokes a single peer live.
+  rpc RemovePeer(RemovePeerRequest) returns (PeerResponse);
+
+  // ListPeers returns configured peers and their runtime state (handshakes,
+  // byte counters).
+  rpc ListPeers(ListPeersRequest) returns (ListPeersResponse);
+
+  // RestartService is a last-resort restart of one protocol's service.
+  rpc RestartService(RestartServiceRequest) returns (RestartServiceResponse);
+
+  // WatchEvents is a server-stream of live node events. helm holds it open;
+  // this is what makes the admin UI live (DESIGN §7, helm milestone M4).
+  rpc WatchEvents(WatchEventsRequest) returns (stream Event);
+}
+
+// Protocol identifies a data-plane protocol. Unknown values are ignored, never
+// rejected (DESIGN §11).
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_AMNEZIAWG = 1;
+  PROTOCOL_XRAY_REALITY = 2;
+}
+
+// Peer is one end-user tunnel credential as helm defines it.
+message Peer {
+  // id is helm's peer identifier, echoed back for correlation.
+  string id = 1;
+  Protocol protocol = 2;
+  // public_key is the AmneziaWG public key, or the XRay client UUID.
+  string public_key = 3;
+  repeated string allowed_ips = 4;
+  // preshared_key is optional (AmneziaWG).
+  string preshared_key = 5;
+  // endpoint is an optional fixed peer endpoint.
+  string endpoint = 6;
+}
+
+// PeerState is a Peer plus its runtime state on the node.
+message PeerState {
+  Peer peer = 1;
+  google.protobuf.Timestamp last_handshake = 2;
+  uint64 rx_bytes = 3;
+  uint64 tx_bytes = 4;
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  string agent_version = 1;
+  int64 uptime_seconds = 2;
+  repeated ServiceStatus services = 3;
+}
+
+// ServiceStatus is the health of one protocol's data-plane service.
+message ServiceStatus {
+  Protocol protocol = 1;
+  bool running = 2;
+  // listening reports whether the service is bound to its public port (443).
+  bool listening = 3;
+  uint32 peer_count = 4;
+  string detail = 5;
+}
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse {
+  repeated PeerState peers = 1;
+  uint64 total_rx_bytes = 2;
+  uint64 total_tx_bytes = 3;
+  uint64 handshakes_total = 4;
+  uint64 errors_total = 5;
+}
+
+message PushConfigRequest {
+  Protocol protocol = 1;
+  // revision is helm's monotonically increasing config revision.
+  int64 revision = 2;
+  // config is the opaque, protocol-specific config document.
+  bytes config = 3;
+}
+
+message PushConfigResponse {
+  int64 applied_revision = 1;
+  bool reloaded = 2;
+}
+
+message AddPeerRequest {
+  Peer peer = 1;
+}
+
+message RemovePeerRequest {
+  Protocol protocol = 1;
+  string public_key = 2;
+}
+
+// PeerResponse is the result of an AddPeer or RemovePeer call.
+message PeerResponse {
+  string peer_id = 1;
+  bool applied = 2;
+}
+
+message ListPeersRequest {
+  // protocol filters the result; PROTOCOL_UNSPECIFIED returns every peer.
+  Protocol protocol = 1;
+}
+
+message ListPeersResponse {
+  repeated PeerState peers = 1;
+}
+
+message RestartServiceRequest {
+  Protocol protocol = 1;
+}
+
+message RestartServiceResponse {
+  bool restarted = 1;
+}
+
+message WatchEventsRequest {}
+
+// EventType classifies a live node event.
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_HANDSHAKE_UP = 1;
+  EVENT_TYPE_HANDSHAKE_DOWN = 2;
+  EVENT_TYPE_PEER_CONNECTED = 3;
+  EVENT_TYPE_PEER_DISCONNECTED = 4;
+  EVENT_TYPE_ERROR = 5;
+}
+
+// Event is one live event streamed from a node to helm.
+message Event {
+  google.protobuf.Timestamp at = 1;
+  EventType type = 2;
+  Protocol protocol = 3;
+  // peer_id is set for peer-scoped events.
+  string peer_id = 4;
+  string message = 5;
+}
