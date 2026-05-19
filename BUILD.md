@@ -45,9 +45,9 @@ config write → return a typed error; the running data plane keeps last-known-g
 
 `buoy`'s control channel is a **plain mTLS gRPC server** — `helm` dials it
 directly (the node is public). It does **not** need the reverse-tunnel code;
-that belongs to `beacon`. You may lift the **mTLS setup / CA-verification**
-helpers from the `sultix` project — and if you do, obey the rebrand rule in
-`docs/BUILD.md` §4 (strip every `sultix`/`mc*`/`x-sultix-*` identifier).
+that belongs to `beacon`. You may adapt the **mTLS setup / CA-verification**
+helpers the operator wrote for an earlier private project — and if you do,
+obey the rebrand rule in `docs/BUILD.md` §4 (strip every origin identifier).
 
 ## Milestones
 
