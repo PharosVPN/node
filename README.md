@@ -19,7 +19,8 @@ Part of the [PharosVPN](https://github.com/PharosVPN) platform — see
 - **Control port.** Listens for the controller's mTLS/gRPC connection: status,
   metrics, config push, live peer add/remove, service restart — and streams
   live events back.
-- **No SSH.** The agent replaces SSH entirely. sshd can be disabled on prod nodes.
+- **SSH is install-only.** `helm` reaches a node over SSH solely to install and
+  update the agent (DESIGN §5); every operational instruction is gRPC.
 - **Cold-start resilient.** Comes up from disk every boot; controller offline ⇒
   existing tunnels keep working.
 

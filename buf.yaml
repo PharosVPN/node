@@ -1,0 +1,18 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # PeerResponse is intentionally shared by AddPeer and RemovePeer — they
+    # return the same shape, and forcing two identical messages is pure
+    # ceremony. Event is the semantic name for the WatchEvents stream message.
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - RPC_RESPONSE_STANDARD_NAME
+    # NodeControl is a clear service name; the "Service" suffix is buf house
+    # style only, and a rename would churn a wire identifier across repos.
+    - SERVICE_SUFFIX
+breaking:
+  use:
+    - FILE

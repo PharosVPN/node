@@ -1,0 +1,12 @@
+# Build output
+/buoy
+/dist/
+
+# Node mTLS material — never committed (DESIGN §4, §5)
+/etc/
+*.key
+*.crt
+node.csr
+
+# OS / editor cruft
+.DS_Store
