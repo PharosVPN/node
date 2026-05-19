@@ -122,11 +122,14 @@ func distinctHeaders() ([4]uint32, error) {
 	return hs, nil
 }
 
-// Validate checks the invariants generateObfuscation guarantees. It guards a
-// persisted set loaded from disk against corruption.
+// Validate checks the structural rules the control.proto AmneziaWGObfuscation
+// contract requires every generator and validator to enforce: jmin <= jmax,
+// h1-h4 distinct and >= 5, and s2 != s1+56. It guards a persisted set loaded
+// from disk against corruption. (generateObfuscation produces jmin strictly
+// below jmax; the contract permits equality.)
 func (o Obfuscation) Validate() error {
-	if o.Jmin >= o.Jmax {
-		return fmt.Errorf("awg: Jmin (%d) must be < Jmax (%d)", o.Jmin, o.Jmax)
+	if o.Jmin > o.Jmax {
+		return fmt.Errorf("awg: Jmin (%d) must be <= Jmax (%d)", o.Jmin, o.Jmax)
 	}
 	hs := [4]uint32{o.H1, o.H2, o.H3, o.H4}
 	seen := make(map[uint32]bool, 4)

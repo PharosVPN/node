@@ -57,7 +57,8 @@ func TestObfuscationValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid", func(*Obfuscation) {}, false},
-		{"jmin>=jmax", func(o *Obfuscation) { o.Jmin = o.Jmax }, true},
+		{"jmin>jmax", func(o *Obfuscation) { o.Jmin = o.Jmax + 1 }, true},
+		{"jmin==jmax allowed", func(o *Obfuscation) { o.Jmin = o.Jmax }, false},
 		{"header below min", func(o *Obfuscation) { o.H1 = 4 }, true},
 		{"headers not distinct", func(o *Obfuscation) { o.H2 = o.H1 }, true},
 		{"s2 collides with s1", func(o *Obfuscation) { o.S2 = o.S1 + s2HeaderOffset }, true},

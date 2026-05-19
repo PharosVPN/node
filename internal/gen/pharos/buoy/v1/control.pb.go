@@ -543,6 +543,14 @@ func (x *AmneziaWGInfo) GetObfuscation() *AmneziaWGObfuscation {
 // node randomises its own set for traffic diversity, so caravel must receive
 // the exact values to build a tunnel that handshakes (DESIGN §3). The field
 // names match the AmneziaWG config keys verbatim.
+//
+// buoy generates and enforces these structural rules; any client that
+// generates or validates a set must apply the same guards:
+//   - jmin <= jmax
+//   - h1-h4 are four distinct values, each >= 5 (1-4 are reserved for
+//     AmneziaWG's standard packet types)
+//   - s2 != s1 + 56 — otherwise a padded init packet is length-
+//     indistinguishable from a padded response packet and awg rejects it
 type AmneziaWGObfuscation struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Jc            uint32                 `protobuf:"varint,1,opt,name=jc,proto3" json:"jc,omitempty"`     // junk packet count

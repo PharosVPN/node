@@ -66,13 +66,13 @@ func TestLoadRejectsCorruptState(t *testing.T) {
 
 func TestLoadRejectsInvalidObfuscation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "awg-node.json")
-	// A well-formed key but an obfuscation set that violates Jmin < Jmax.
+	// A well-formed key but an obfuscation set that violates Jmin <= Jmax.
 	good, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bad := good
-	bad.obfuscation.Jmin = bad.obfuscation.Jmax
+	bad.obfuscation.Jmin = bad.obfuscation.Jmax + 1
 	if err := bad.persist(path); err != nil {
 		t.Fatal(err)
 	}
