@@ -161,6 +161,42 @@ func TestRemovePeerMissingPublicKey(t *testing.T) {
 	}
 }
 
+// --- GetMetrics -------------------------------------------------------------
+
+func TestGetMetricsRPC(t *testing.T) {
+	c := startTestServer(t)
+
+	// Push two peers so the conf has something to correlate against. The
+	// stub Runtime reports no live state, so per-peer counters stay zero —
+	// the test asserts the response shape, not live byte totals (those are
+	// covered by Manager-level tests with a richer fake).
+	cfg := &buoyv1.AmneziaWGConfig{Peers: []*buoyv1.Peer{
+		{Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG, PublicKey: "A=", AllowedIps: []string{"10.0.0.2/32"}},
+		{Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG, PublicKey: "B=", AllowedIps: []string{"10.0.0.3/32"}},
+	}}
+	body, err := proto.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.PushConfig(context.Background(), &buoyv1.PushConfigRequest{
+		Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG, Revision: 1, Config: body,
+	}); err != nil {
+		t.Fatalf("PushConfig: %v", err)
+	}
+
+	resp, err := c.GetMetrics(context.Background(), &buoyv1.GetMetricsRequest{})
+	if err != nil {
+		t.Fatalf("GetMetrics: %v", err)
+	}
+	if len(resp.GetPeers()) != 2 {
+		t.Errorf("peers = %d, want 2", len(resp.GetPeers()))
+	}
+	// handshakes_total / errors_total are reserved for B5's poller.
+	if resp.GetHandshakesTotal() != 0 || resp.GetErrorsTotal() != 0 {
+		t.Errorf("expected zero cumulative counters in B4: %+v", resp)
+	}
+}
+
 // --- GetStatus health -------------------------------------------------------
 
 func TestGetStatusIncludesAmneziaWGService(t *testing.T) {

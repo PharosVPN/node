@@ -335,6 +335,47 @@ func TestPushConfigEqualRevisionIsIdempotent(t *testing.T) {
 	}
 }
 
+// --- Metrics ----------------------------------------------------------------
+
+func TestMetricsSumsLiveBytes(t *testing.T) {
+	mgr, rt := newTestManager(t)
+	ctx := context.Background()
+	if _, err := mgr.AddPeer(ctx, peer("p1", "PUBA=", "", "10.0.0.2/32")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.AddPeer(ctx, peer("p2", "PUBB=", "", "10.0.0.3/32")); err != nil {
+		t.Fatal(err)
+	}
+	rt.setLivePeer(LivePeer{PublicKey: "PUBA=", RxBytes: 100, TxBytes: 200})
+	rt.setLivePeer(LivePeer{PublicKey: "PUBB=", RxBytes: 25, TxBytes: 75})
+
+	snap, err := mgr.Metrics(ctx)
+	if err != nil {
+		t.Fatalf("Metrics: %v", err)
+	}
+	if len(snap.Peers) != 2 {
+		t.Errorf("peers = %d, want 2", len(snap.Peers))
+	}
+	if snap.TotalRx != 125 || snap.TotalTx != 275 {
+		t.Errorf("totals = rx %d / tx %d, want 125 / 275", snap.TotalRx, snap.TotalTx)
+	}
+	// handshakes_total / errors_total are placeholders until the B5 poller.
+	if snap.Handshakes != 0 || snap.Errors != 0 {
+		t.Errorf("expected zero cumulative counters in B4: %+v", snap)
+	}
+}
+
+func TestMetricsZeroWhenInterfaceDown(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	snap, err := mgr.Metrics(context.Background())
+	if err != nil {
+		t.Fatalf("Metrics: %v", err)
+	}
+	if len(snap.Peers) != 0 || snap.TotalRx != 0 || snap.TotalTx != 0 {
+		t.Errorf("metrics on down interface non-zero: %+v", snap)
+	}
+}
+
 // --- Status ----------------------------------------------------------------
 
 func TestStatusReportsDownThenUp(t *testing.T) {
