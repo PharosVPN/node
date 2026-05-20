@@ -42,6 +42,25 @@ func newService(version string, awgNode *awg.Node, awgManager *awg.Manager) *ser
 	}
 }
 
+// GetMetrics reports the data plane's current counters. AmneziaWG metrics
+// come from the same conf+live correlation as ListPeers, with summed totals.
+// handshakes_total / errors_total are reserved for the B5 polling observer
+// that also feeds WatchEvents — they stay at zero in B4. XRay metrics land
+// in B3.
+func (s *service) GetMetrics(ctx context.Context, _ *buoyv1.GetMetricsRequest) (*buoyv1.GetMetricsResponse, error) {
+	snap, err := s.awgManager.Metrics(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "GetMetrics: %v", err)
+	}
+	return &buoyv1.GetMetricsResponse{
+		Peers:           snap.Peers,
+		TotalRxBytes:    snap.TotalRx,
+		TotalTxBytes:    snap.TotalTx,
+		HandshakesTotal: snap.Handshakes,
+		ErrorsTotal:     snap.Errors,
+	}, nil
+}
+
 // GetStatus reports the node's agent version, uptime, the AmneziaWG server
 // identity, and per-protocol service health.
 func (s *service) GetStatus(ctx context.Context, _ *buoyv1.GetStatusRequest) (*buoyv1.GetStatusResponse, error) {

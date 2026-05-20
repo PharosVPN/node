@@ -138,7 +138,7 @@ obey the rebrand rule in `docs/BUILD.md` §4 (strip every origin identifier).
 | B1 | Repo skeleton, config loader, the `gen-csr`/`run`/`version` commands, mTLS `NodeControl` gRPC server skeleton (RPCs return `Unimplemented`). `GetStatus` is implemented early — it reports the per-node AmneziaWG identity + obfuscation set `helm` needs before it will provision devices. |
 | B2 | AmneziaWG management: `PushConfig` (AmneziaWGConfig wire format), `AddPeer`/`RemovePeer` (live + conf, idempotent), `ListPeers` (conf joined with `awg show`); `GetStatus` reports the AmneziaWG `ServiceStatus`. Obfuscation comes from `awg-node.json` only. |
 | B3 | XRay management: `PushConfig`, `AddPeer`/`RemovePeer`, `ListPeers` |
-| B4 | `GetMetrics` |
+| B4 | `GetMetrics`: per-peer counters + summed totals from `awg show`. `handshakes_total` / `errors_total` are reserved for the B5 polling observer that also feeds `WatchEvents`; they stay at zero in B4 and accumulate once that observer lands. |
 | B5 | `WatchEvents` server-stream |
 | B6 | Cold-start-from-disk + cloud-init packaging (static binary) |
 

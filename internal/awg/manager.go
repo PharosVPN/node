@@ -220,6 +220,36 @@ func (m *Manager) ListPeers(ctx context.Context) ([]*buoyv1.PeerState, error) {
 	return out, nil
 }
 
+// Metrics returns the AmneziaWG data plane's current metrics snapshot.
+type MetricsSnapshot struct {
+	Peers   []*buoyv1.PeerState
+	TotalRx uint64
+	TotalTx uint64
+	// Handshakes and Errors are cumulative counters. They stay at zero in B4
+	// — accumulating them across time requires the polling observer that
+	// also feeds WatchEvents (B5 — peer connect/disconnect, errors).
+	Handshakes uint64
+	Errors     uint64
+}
+
+// Metrics builds a metrics snapshot from the current conf+live correlation.
+// Per-peer counters come from `awg show`; totals are sums over the live
+// peer set. Peers in the conf but not yet observed live contribute zero,
+// matching helm's expectation of a Prometheus-style monotonic counter that
+// only advances when traffic flows.
+func (m *Manager) Metrics(ctx context.Context) (*MetricsSnapshot, error) {
+	peers, err := m.ListPeers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	snap := &MetricsSnapshot{Peers: peers}
+	for _, p := range peers {
+		snap.TotalRx += p.GetRxBytes()
+		snap.TotalTx += p.GetTxBytes()
+	}
+	return snap, nil
+}
+
 // Status reports the AmneziaWG service health.
 func (m *Manager) Status(ctx context.Context) (running, listening bool, peerCount uint32, detail string) {
 	m.mu.Lock()

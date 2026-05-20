@@ -73,9 +73,11 @@ func TestServeAcceptsMutualTLS(t *testing.T) {
 	}
 
 	// Unimplemented RPCs still return a clean Unimplemented over mTLS.
-	_, err = buoyv1.NewNodeControlClient(conn).GetMetrics(context.Background(), &buoyv1.GetMetricsRequest{})
+	// SetNetworkConfig (decision 16) is a later-milestone RPC.
+	_, err = buoyv1.NewNodeControlClient(conn).SetNetworkConfig(context.Background(),
+		&buoyv1.SetNetworkConfigRequest{Config: &buoyv1.NetworkConfig{}})
 	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("GetMetrics: got %v, want Unimplemented", err)
+		t.Errorf("SetNetworkConfig: got %v, want Unimplemented", err)
 	}
 }
 
