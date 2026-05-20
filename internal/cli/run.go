@@ -53,6 +53,7 @@ func newRunCmd() *cobra.Command {
 				Runtime:      awg.NewExecRuntime(),
 				ConfPath:     awg.DefaultConfPath,
 				RevisionPath: cfg.AWGRevisionPath(),
+				Log:          log,
 			})
 			if err != nil {
 				return err
@@ -78,6 +79,10 @@ func newRunCmd() *cobra.Command {
 			// Shut down gracefully on SIGINT/SIGTERM — systemd sends SIGTERM.
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
+
+			// Start the polling observer that feeds WatchEvents and the
+			// cumulative GetMetrics counters; it runs until ctx cancels.
+			awgManager.Start(ctx)
 
 			return srv.Serve(ctx)
 		},

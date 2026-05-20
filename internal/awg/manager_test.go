@@ -24,6 +24,7 @@ type fakeRuntime struct {
 	confPath  string
 	live      map[string]LivePeer
 	calls     []string
+	showErr   error // injected; non-nil → Show returns this error
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -70,11 +71,28 @@ func (r *fakeRuntime) RemovePeer(_ context.Context, publicKey string) error {
 func (r *fakeRuntime) Show(_ context.Context) ([]LivePeer, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.showErr != nil {
+		return nil, r.showErr
+	}
 	out := make([]LivePeer, 0, len(r.live))
 	for _, p := range r.live {
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// setListening flips the listening flag without going through Up.
+func (r *fakeRuntime) setListening(up bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.listening = up
+}
+
+// setShowErr injects an error into the next Show calls.
+func (r *fakeRuntime) setShowErr(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.showErr = err
 }
 
 func (r *fakeRuntime) Listening(_ context.Context) (bool, error) {

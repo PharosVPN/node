@@ -20,9 +20,11 @@ import (
 // GetStatus reports the node's AmneziaWG identity (helm refuses to provision
 // devices until it has it — DESIGN §3) and the AmneziaWG service health.
 // PushConfig, AddPeer, RemovePeer, ListPeers manage the AmneziaWG peer set
-// (B2); XRay management lands in B3 — those calls return Unimplemented for
-// now. SetNetworkConfig (decision 16) and WatchEvents are Unimplemented in
-// B2 and ship in later milestones.
+// (B2). GetMetrics reports counters (B4) — totals from the conf+live join
+// plus cumulative handshakes_total / errors_total fed by the observer.
+// WatchEvents streams the observer's live events (B5). XRay management
+// lands in B3 — those calls return Unimplemented for now;
+// SetNetworkConfig (decision 16) ships in a later milestone.
 type service struct {
 	buoyv1.UnimplementedNodeControlServer
 
@@ -77,6 +79,33 @@ func (s *service) GetStatus(ctx context.Context, _ *buoyv1.GetStatusRequest) (*b
 		}},
 		Amneziawg: s.awgNode.Info(),
 	}, nil
+}
+
+// WatchEvents streams live data-plane events to helm: handshake up/down,
+// peer connect/disconnect, observer errors. helm holds the stream open;
+// this is what makes the admin UI live (DESIGN §7). The first events fire
+// once the observer has its baseline (one poll cycle after Manager.Start),
+// so a new stream on a quiet node may see no traffic until something
+// changes — that's expected.
+func (s *service) WatchEvents(_ *buoyv1.WatchEventsRequest, stream buoyv1.NodeControl_WatchEventsServer) error {
+	events, cancel := s.awgManager.Subscribe()
+	defer cancel()
+
+	ctx := stream.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ev, ok := <-events:
+			if !ok {
+				// Observer shut down (buoy is exiting); end the stream cleanly.
+				return nil
+			}
+			if err := stream.Send(ev); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // PushConfig replaces the data-plane peer set for one protocol.

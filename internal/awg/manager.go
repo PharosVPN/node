@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -41,15 +43,26 @@ type ManagerOptions struct {
 	// RevisionPath persists the last applied PushConfig revision across
 	// restarts; required.
 	RevisionPath string
+	// ObserverInterval and ObserverStaleThreshold tune the polling
+	// observer that feeds WatchEvents and the cumulative counters
+	// (handshakes_total, errors_total) on GetMetrics. Zero values fall back
+	// to package defaults.
+	ObserverInterval       time.Duration
+	ObserverStaleThreshold time.Duration
+	// Log is the manager's logger; the observer inherits it.
+	Log *slog.Logger
 }
 
-// Manager owns the AmneziaWG data plane: awg0's running state, awg0.conf, and
-// the last-applied PushConfig revision. All mutations are serialised.
+// Manager owns the AmneziaWG data plane: awg0's running state, awg0.conf, the
+// last-applied PushConfig revision, and the polling observer that produces
+// WatchEvents and accumulates GetMetrics counters. All mutations are
+// serialised.
 type Manager struct {
 	node         *Node
 	runtime      Runtime
 	confPath     string
 	revisionPath string
+	observer     *Observer
 
 	mu              sync.Mutex
 	appliedRevision int64
@@ -77,6 +90,12 @@ func NewManager(opts ManagerOptions) (*Manager, error) {
 		runtime:      opts.Runtime,
 		confPath:     confPath,
 		revisionPath: opts.RevisionPath,
+		observer: NewObserver(
+			opts.Runtime,
+			opts.ObserverInterval,
+			opts.ObserverStaleThreshold,
+			opts.Log,
+		),
 	}
 	rev, err := readRevision(opts.RevisionPath)
 	if err != nil {
@@ -84,6 +103,21 @@ func NewManager(opts ManagerOptions) (*Manager, error) {
 	}
 	m.appliedRevision = rev
 	return m, nil
+}
+
+// Start launches the polling observer in the background; it runs until ctx
+// cancels. Subscribers (WatchEvents streams) registered before Start get the
+// first poll's events too, but the first poll itself establishes the
+// baseline silently.
+func (m *Manager) Start(ctx context.Context) {
+	go m.observer.Run(ctx)
+}
+
+// Subscribe registers a WatchEvents consumer with the observer. The returned
+// cancel must be called when the stream ends so the subscriber slot is
+// released.
+func (m *Manager) Subscribe() (<-chan *buoyv1.Event, func()) {
+	return m.observer.Subscribe()
 }
 
 // AppliedRevision returns the last successfully applied PushConfig revision.
@@ -220,29 +254,31 @@ func (m *Manager) ListPeers(ctx context.Context) ([]*buoyv1.PeerState, error) {
 	return out, nil
 }
 
-// Metrics returns the AmneziaWG data plane's current metrics snapshot.
+// MetricsSnapshot is the AmneziaWG data plane's current metrics snapshot.
 type MetricsSnapshot struct {
 	Peers   []*buoyv1.PeerState
 	TotalRx uint64
 	TotalTx uint64
-	// Handshakes and Errors are cumulative counters. They stay at zero in B4
-	// — accumulating them across time requires the polling observer that
-	// also feeds WatchEvents (B5 — peer connect/disconnect, errors).
+	// Handshakes and Errors are cumulative counters maintained by the
+	// observer (B5) — they only advance when the observer witnesses a
+	// transition, matching Prometheus monotonic-counter semantics.
 	Handshakes uint64
 	Errors     uint64
 }
 
 // Metrics builds a metrics snapshot from the current conf+live correlation.
-// Per-peer counters come from `awg show`; totals are sums over the live
-// peer set. Peers in the conf but not yet observed live contribute zero,
-// matching helm's expectation of a Prometheus-style monotonic counter that
-// only advances when traffic flows.
+// Per-peer counters come from `awg show`; totals are sums over the live peer
+// set. The cumulative counters come from the observer.
 func (m *Manager) Metrics(ctx context.Context) (*MetricsSnapshot, error) {
 	peers, err := m.ListPeers(ctx)
 	if err != nil {
 		return nil, err
 	}
-	snap := &MetricsSnapshot{Peers: peers}
+	snap := &MetricsSnapshot{
+		Peers:      peers,
+		Handshakes: m.observer.HandshakesTotal(),
+		Errors:     m.observer.ErrorsTotal(),
+	}
 	for _, p := range peers {
 		snap.TotalRx += p.GetRxBytes()
 		snap.TotalTx += p.GetTxBytes()

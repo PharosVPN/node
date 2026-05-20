@@ -5,7 +5,9 @@ package control
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
 	"google.golang.org/grpc/codes"
@@ -194,6 +196,40 @@ func TestGetMetricsRPC(t *testing.T) {
 	// handshakes_total / errors_total are reserved for B5's poller.
 	if resp.GetHandshakesTotal() != 0 || resp.GetErrorsTotal() != 0 {
 		t.Errorf("expected zero cumulative counters in B4: %+v", resp)
+	}
+}
+
+// --- WatchEvents ------------------------------------------------------------
+
+// TestWatchEventsClosesOnClientCancel proves the server-stream plumbing:
+// the client opens WatchEvents, cancels its context, and the server-side
+// stream returns cleanly without leaking the subscriber. Detailed event
+// detection is covered under package awg.
+func TestWatchEventsClosesOnClientCancel(t *testing.T) {
+	c := startTestServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := c.WatchEvents(ctx, &buoyv1.WatchEventsRequest{})
+	if err != nil {
+		t.Fatalf("WatchEvents: %v", err)
+	}
+
+	// Cancel the client side; Recv should return promptly with the
+	// cancellation error.
+	done := make(chan error, 1)
+	go func() {
+		_, recvErr := stream.Recv()
+		done <- recvErr
+	}()
+	cancel()
+
+	select {
+	case err := <-done:
+		if status.Code(err) != codes.Canceled && !errors.Is(err, context.Canceled) {
+			t.Errorf("Recv after cancel: got %v, want Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Recv did not return after client cancel")
 	}
 }
 

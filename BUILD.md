@@ -139,7 +139,7 @@ obey the rebrand rule in `docs/BUILD.md` §4 (strip every origin identifier).
 | B2 | AmneziaWG management: `PushConfig` (AmneziaWGConfig wire format), `AddPeer`/`RemovePeer` (live + conf, idempotent), `ListPeers` (conf joined with `awg show`); `GetStatus` reports the AmneziaWG `ServiceStatus`. Obfuscation comes from `awg-node.json` only. |
 | B3 | XRay management: `PushConfig`, `AddPeer`/`RemovePeer`, `ListPeers` |
 | B4 | `GetMetrics`: per-peer counters + summed totals from `awg show`. `handshakes_total` / `errors_total` are reserved for the B5 polling observer that also feeds `WatchEvents`; they stay at zero in B4 and accumulate once that observer lands. |
-| B5 | `WatchEvents` server-stream |
+| B5 | `WatchEvents` server-stream + polling observer. One observer goroutine polls `awg show` (default 5s), diffs against the previous snapshot, and broadcasts events to subscribers: `PEER_CONNECTED`/`DISCONNECTED`, `HANDSHAKE_UP` on each new or rekey handshake, `HANDSHAKE_DOWN` once when a handshake ages past 180s, `ERROR` on poll failure. Also accumulates B4's `handshakes_total` / `errors_total`. The first poll establishes the baseline silently — replay is via `GetStatus`+`ListPeers`. Slow subscribers drop overflow rather than block the observer. |
 | B6 | Cold-start-from-disk + cloud-init packaging (static binary) |
 
 ## Non-negotiables
