@@ -23,6 +23,7 @@ import (
 
 	"github.com/PharosVPN/buoy/internal/awg"
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	"github.com/PharosVPN/buoy/internal/netpolicy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -72,12 +73,12 @@ func TestServeAcceptsMutualTLS(t *testing.T) {
 		t.Errorf("amneziawg.obfuscation invalid: %+v", obf)
 	}
 
-	// Unimplemented RPCs still return a clean Unimplemented over mTLS.
-	// SetNetworkConfig (decision 16) is a later-milestone RPC.
-	_, err = buoyv1.NewNodeControlClient(conn).SetNetworkConfig(context.Background(),
-		&buoyv1.SetNetworkConfigRequest{Config: &buoyv1.NetworkConfig{}})
+	// RestartService is still Unimplemented — used here as the canary that
+	// proves unwired RPCs still return a clean Unimplemented over mTLS.
+	_, err = buoyv1.NewNodeControlClient(conn).RestartService(context.Background(),
+		&buoyv1.RestartServiceRequest{Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG})
 	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("SetNetworkConfig: got %v, want Unimplemented", err)
+		t.Errorf("RestartService: got %v, want Unimplemented", err)
 	}
 }
 
@@ -148,9 +149,17 @@ func testOptions(t *testing.T, dir, addr string) Options {
 		Version:      "test-version",
 		AWGNode:      node,
 		AWGManager:   mgr,
+		NetPolicy:    netpolicy.NewManager(&nopApplier{}),
 		Log:          discardLogger(),
 	}
 }
+
+// nopApplier accepts every Policy without touching the system — control
+// tests exercise the RPC surface, not the firewall. The dedicated nft
+// renderer + Manager idempotency tests live under internal/netpolicy.
+type nopApplier struct{}
+
+func (nopApplier) Apply(context.Context, netpolicy.Policy) error { return nil }
 
 // stubRuntime is a minimal awg.Runtime for control-level tests: it reports
 // the interface as down and answers Show with no peers. The data-plane

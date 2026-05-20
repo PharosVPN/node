@@ -12,6 +12,7 @@ import (
 	"github.com/PharosVPN/buoy/internal/awg"
 	"github.com/PharosVPN/buoy/internal/config"
 	"github.com/PharosVPN/buoy/internal/control"
+	"github.com/PharosVPN/buoy/internal/netpolicy"
 	"github.com/spf13/cobra"
 )
 
@@ -62,6 +63,8 @@ func newRunCmd() *cobra.Command {
 				"conf_path", awg.DefaultConfPath,
 				"applied_revision", awgManager.AppliedRevision())
 
+			netPolicy := netpolicy.NewManager(netpolicy.NewNftApplier())
+
 			srv, err := control.NewServer(control.Options{
 				ListenAddr:   cfg.Control.ListenAddr,
 				NodeCertPath: cfg.NodeCertPath(),
@@ -70,6 +73,7 @@ func newRunCmd() *cobra.Command {
 				Version:      version,
 				AWGNode:      awgNode,
 				AWGManager:   awgManager,
+				NetPolicy:    netPolicy,
 				Log:          log,
 			})
 			if err != nil {

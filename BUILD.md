@@ -64,6 +64,9 @@ Implement the server against the proto; do not fork it.
 - `RestartService` — last-resort restart of one protocol's service.
 - `WatchEvents` — **server-stream**: handshake up/down, peer connect/disconnect,
   errors. `helm` holds this open; this is what makes the admin UI live.
+- `SetNetworkConfig` — apply the node's traffic-handling policy (DESIGN §3,
+  decision 16): kernel IP forwarding, source NAT, client-to-client isolation.
+  Idempotent — a replay of the last applied policy returns `applied=false`.
 
 ### AmneziaWG obfuscation
 
@@ -86,6 +89,22 @@ The set and the node's AmneziaWG keypair are generated once and persisted to
 buoy restarts and `awg` reloads — `helm` caches them. The data-plane writer
 (milestone B2) renders them into the `[Interface]` section of `awg0.conf` and
 applies it; `GetStatus` reports the same persisted set.
+
+### Network policy
+
+`SetNetworkConfig` (decision 16) carries three booleans — `forwarding`,
+`masquerade`, `isolation` — on `NetworkConfig`. Buoy applies them via an
+**nftables** table named `pharos_buoy` (atomic `add table; delete table;
+table { … }` reset, idempotent across runs) plus the `/proc/sys` forwarding
+switches. The wire contract is the booleans; the choice of `nftables` vs
+`iptables` vs other is buoy's. Helm's `netpolicy.Policy.Validate` already
+rejects `masquerade`/`isolation` without `forwarding`; buoy repeats the
+check defensively.
+
+Idempotency lives in `internal/netpolicy.Manager`: an in-memory
+last-applied snapshot returns `applied=false` for a duplicate call.
+State is not persisted — nftables rules don't survive reboot either, so a
+restart correctly re-applies on the next call.
 
 ### Data plane
 

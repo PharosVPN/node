@@ -22,6 +22,7 @@ import (
 
 	"github.com/PharosVPN/buoy/internal/awg"
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	"github.com/PharosVPN/buoy/internal/netpolicy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -50,6 +51,9 @@ type Options struct {
 	// AWGManager owns the AmneziaWG data plane (awg0.conf, live state) and
 	// backs AddPeer / RemovePeer / ListPeers and the AmneziaWG ServiceStatus.
 	AWGManager *awg.Manager
+	// NetPolicy applies the node's forwarding / masquerade / isolation
+	// policy on SetNetworkConfig (DESIGN §3, decision 16).
+	NetPolicy *netpolicy.Manager
 	// Log receives server diagnostics.
 	Log *slog.Logger
 }
@@ -63,7 +67,7 @@ func NewServer(opts Options) (*Server, error) {
 	}
 
 	gs := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
-	buoyv1.RegisterNodeControlServer(gs, newService(opts.Version, opts.AWGNode, opts.AWGManager))
+	buoyv1.RegisterNodeControlServer(gs, newService(opts.Version, opts.AWGNode, opts.AWGManager, opts.NetPolicy))
 
 	return &Server{addr: opts.ListenAddr, grpc: gs, log: opts.Log}, nil
 }

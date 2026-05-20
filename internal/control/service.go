@@ -10,6 +10,7 @@ import (
 
 	"github.com/PharosVPN/buoy/internal/awg"
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	"github.com/PharosVPN/buoy/internal/netpolicy"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -32,15 +33,17 @@ type service struct {
 	started    time.Time
 	awgNode    *awg.Node
 	awgManager *awg.Manager
+	netPolicy  *netpolicy.Manager
 }
 
 // newService returns a NodeControl service implementation.
-func newService(version string, awgNode *awg.Node, awgManager *awg.Manager) *service {
+func newService(version string, awgNode *awg.Node, awgManager *awg.Manager, netPolicy *netpolicy.Manager) *service {
 	return &service{
 		version:    version,
 		started:    time.Now(),
 		awgNode:    awgNode,
 		awgManager: awgManager,
+		netPolicy:  netPolicy,
 	}
 }
 
@@ -79,6 +82,33 @@ func (s *service) GetStatus(ctx context.Context, _ *buoyv1.GetStatusRequest) (*b
 		}},
 		Amneziawg: s.awgNode.Info(),
 	}, nil
+}
+
+// SetNetworkConfig applies the node's traffic-handling policy: kernel IP
+// forwarding, source NAT for forwarded traffic, and client-to-client
+// isolation (DESIGN §3, decision 16). The wire contract is just three
+// booleans on NetworkConfig — buoy installs them via nftables + sysctl.
+//
+// The reply's `applied` field reports whether the call took effect (true)
+// or was an idempotent replay of the last applied policy (false).
+func (s *service) SetNetworkConfig(ctx context.Context, req *buoyv1.SetNetworkConfigRequest) (*buoyv1.SetNetworkConfigResponse, error) {
+	nc := req.GetConfig()
+	if nc == nil {
+		return nil, status.Error(codes.InvalidArgument, "SetNetworkConfig: missing config")
+	}
+	p := netpolicy.Policy{
+		Forwarding: nc.GetForwarding(),
+		Masquerade: nc.GetMasquerade(),
+		Isolation:  nc.GetIsolation(),
+	}
+	if err := p.Validate(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "SetNetworkConfig: %v", err)
+	}
+	applied, err := s.netPolicy.Apply(ctx, p)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "SetNetworkConfig: %v", err)
+	}
+	return &buoyv1.SetNetworkConfigResponse{Applied: applied}, nil
 }
 
 // WatchEvents streams live data-plane events to helm: handshake up/down,

@@ -199,6 +199,62 @@ func TestGetMetricsRPC(t *testing.T) {
 	}
 }
 
+// --- SetNetworkConfig -------------------------------------------------------
+
+func TestSetNetworkConfigAppliesAndReplays(t *testing.T) {
+	c := startTestServer(t)
+
+	resp, err := c.SetNetworkConfig(context.Background(), &buoyv1.SetNetworkConfigRequest{
+		Config: &buoyv1.NetworkConfig{Forwarding: true, Masquerade: true},
+	})
+	if err != nil {
+		t.Fatalf("first SetNetworkConfig: %v", err)
+	}
+	if !resp.GetApplied() {
+		t.Error("first call should report applied=true")
+	}
+
+	// An identical call is an idempotent replay.
+	resp, err = c.SetNetworkConfig(context.Background(), &buoyv1.SetNetworkConfigRequest{
+		Config: &buoyv1.NetworkConfig{Forwarding: true, Masquerade: true},
+	})
+	if err != nil {
+		t.Fatalf("replay SetNetworkConfig: %v", err)
+	}
+	if resp.GetApplied() {
+		t.Error("identical replay should report applied=false")
+	}
+
+	// A changed policy applies again.
+	resp, err = c.SetNetworkConfig(context.Background(), &buoyv1.SetNetworkConfigRequest{
+		Config: &buoyv1.NetworkConfig{Forwarding: true, Isolation: true},
+	})
+	if err != nil {
+		t.Fatalf("changed SetNetworkConfig: %v", err)
+	}
+	if !resp.GetApplied() {
+		t.Error("changed policy should report applied=true")
+	}
+}
+
+func TestSetNetworkConfigRejectsInvalid(t *testing.T) {
+	c := startTestServer(t)
+	_, err := c.SetNetworkConfig(context.Background(), &buoyv1.SetNetworkConfigRequest{
+		Config: &buoyv1.NetworkConfig{Masquerade: true}, // forwarding=false
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("masquerade without forwarding: got %v, want InvalidArgument", err)
+	}
+}
+
+func TestSetNetworkConfigMissingConfig(t *testing.T) {
+	c := startTestServer(t)
+	_, err := c.SetNetworkConfig(context.Background(), &buoyv1.SetNetworkConfigRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("missing config: got %v, want InvalidArgument", err)
+	}
+}
+
 // --- WatchEvents ------------------------------------------------------------
 
 // TestWatchEventsClosesOnClientCancel proves the server-stream plumbing:
