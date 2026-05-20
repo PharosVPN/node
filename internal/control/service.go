@@ -5,44 +5,156 @@ package control
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/PharosVPN/buoy/internal/awg"
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // service implements the NodeControl gRPC service.
 //
-// GetStatus is implemented so helm can read the node's AmneziaWG identity and
-// obfuscation set — helm refuses to provision devices onto a node until it has
-// them (DESIGN §3). The remaining data-plane RPCs are wired but unimplemented;
-// they land in later milestones (B2: AmneziaWG, B3: XRay, B4: metrics,
-// B5: WatchEvents). The embedded UnimplementedNodeControlServer supplies them
-// and keeps the type forward-compatible.
+// GetStatus reports the node's AmneziaWG identity (helm refuses to provision
+// devices until it has it — DESIGN §3) and the AmneziaWG service health.
+// PushConfig, AddPeer, RemovePeer, ListPeers manage the AmneziaWG peer set
+// (B2); XRay management lands in B3 — those calls return Unimplemented for
+// now. SetNetworkConfig (decision 16) and WatchEvents are Unimplemented in
+// B2 and ship in later milestones.
 type service struct {
 	buoyv1.UnimplementedNodeControlServer
 
-	version string
-	started time.Time
-	awgNode *awg.Node
+	version    string
+	started    time.Time
+	awgNode    *awg.Node
+	awgManager *awg.Manager
 }
 
 // newService returns a NodeControl service implementation.
-func newService(version string, awgNode *awg.Node) *service {
+func newService(version string, awgNode *awg.Node, awgManager *awg.Manager) *service {
 	return &service{
-		version: version,
-		started: time.Now(),
-		awgNode: awgNode,
+		version:    version,
+		started:    time.Now(),
+		awgNode:    awgNode,
+		awgManager: awgManager,
 	}
 }
 
-// GetStatus reports the node's agent version, uptime, and AmneziaWG server
-// identity. The identity is stable across restarts (see package awg), so helm
-// can cache it and hand the obfuscation set to every client of the node.
-func (s *service) GetStatus(_ context.Context, _ *buoyv1.GetStatusRequest) (*buoyv1.GetStatusResponse, error) {
+// GetStatus reports the node's agent version, uptime, the AmneziaWG server
+// identity, and per-protocol service health.
+func (s *service) GetStatus(ctx context.Context, _ *buoyv1.GetStatusRequest) (*buoyv1.GetStatusResponse, error) {
+	running, listening, peerCount, detail := s.awgManager.Status(ctx)
 	return &buoyv1.GetStatusResponse{
 		AgentVersion:  s.version,
 		UptimeSeconds: int64(time.Since(s.started).Seconds()),
-		Amneziawg:     s.awgNode.Info(),
+		Services: []*buoyv1.ServiceStatus{{
+			Protocol:  buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+			Running:   running,
+			Listening: listening,
+			PeerCount: peerCount,
+			Detail:    detail,
+		}},
+		Amneziawg: s.awgNode.Info(),
 	}, nil
+}
+
+// PushConfig replaces the data-plane peer set for one protocol.
+//
+// The wire encoding of req.config is fixed by the proto comment:
+// PROTOCOL_AMNEZIAWG carries proto.Marshal of AmneziaWGConfig (decision: docs
+// PR #11 / helm PR #28). XRay's encoding lands in B3; other protocols are
+// Unimplemented. The node-level obfuscation parameters are deliberately not
+// in AmneziaWGConfig — buoy owns them (awg-node.json), and a request that
+// somehow carries them would be ignored.
+func (s *service) PushConfig(ctx context.Context, req *buoyv1.PushConfigRequest) (*buoyv1.PushConfigResponse, error) {
+	if req.GetProtocol() != buoyv1.Protocol_PROTOCOL_AMNEZIAWG {
+		return nil, status.Errorf(codes.Unimplemented,
+			"PushConfig: protocol %s not yet implemented", req.GetProtocol())
+	}
+
+	var cfg buoyv1.AmneziaWGConfig
+	if err := proto.Unmarshal(req.GetConfig(), &cfg); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"PushConfig: decode AmneziaWGConfig: %v", err)
+	}
+
+	peers := make([]awg.ConfPeer, 0, len(cfg.GetPeers()))
+	for _, p := range cfg.GetPeers() {
+		if p == nil || p.GetPublicKey() == "" {
+			return nil, status.Error(codes.InvalidArgument,
+				"PushConfig: peer missing public_key")
+		}
+		peers = append(peers, awg.ConfPeer{
+			PublicKey:    p.GetPublicKey(),
+			PresharedKey: p.GetPresharedKey(),
+			AllowedIPs:   append([]string(nil), p.GetAllowedIps()...),
+		})
+	}
+
+	applied, reloaded, err := s.awgManager.PushConfig(ctx, req.GetRevision(), peers)
+	if err != nil {
+		var stale awg.ErrStaleRevision
+		if errors.As(err, &stale) {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"PushConfig: %s", stale.Error())
+		}
+		return nil, status.Errorf(codes.Internal, "PushConfig: %v", err)
+	}
+	return &buoyv1.PushConfigResponse{
+		AppliedRevision: applied,
+		Reloaded:        reloaded,
+	}, nil
+}
+
+// AddPeer adds one peer live. Only AmneziaWG is supported in B2; XRay
+// returns Unimplemented (lands in B3).
+func (s *service) AddPeer(ctx context.Context, req *buoyv1.AddPeerRequest) (*buoyv1.PeerResponse, error) {
+	peer := req.GetPeer()
+	if peer == nil {
+		return nil, status.Error(codes.InvalidArgument, "AddPeer: missing peer")
+	}
+	if peer.GetProtocol() != buoyv1.Protocol_PROTOCOL_AMNEZIAWG {
+		return nil, status.Errorf(codes.Unimplemented,
+			"AddPeer: protocol %s not yet implemented", peer.GetProtocol())
+	}
+	applied, err := s.awgManager.AddPeer(ctx, peer)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "AddPeer: %v", err)
+	}
+	return &buoyv1.PeerResponse{PeerId: peer.GetId(), Applied: applied}, nil
+}
+
+// RemovePeer revokes one peer live. Only AmneziaWG is supported in B2.
+func (s *service) RemovePeer(ctx context.Context, req *buoyv1.RemovePeerRequest) (*buoyv1.PeerResponse, error) {
+	if req.GetProtocol() != buoyv1.Protocol_PROTOCOL_AMNEZIAWG {
+		return nil, status.Errorf(codes.Unimplemented,
+			"RemovePeer: protocol %s not yet implemented", req.GetProtocol())
+	}
+	if req.GetPublicKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "RemovePeer: missing public_key")
+	}
+	applied, err := s.awgManager.RemovePeer(ctx, req.GetPublicKey())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "RemovePeer: %v", err)
+	}
+	return &buoyv1.PeerResponse{Applied: applied}, nil
+}
+
+// ListPeers returns configured peers joined with their live state on awg0.
+// Filtering by XRay returns Unimplemented; PROTOCOL_UNSPECIFIED is treated
+// as AmneziaWG-only until B3 lands XRay.
+func (s *service) ListPeers(ctx context.Context, req *buoyv1.ListPeersRequest) (*buoyv1.ListPeersResponse, error) {
+	switch req.GetProtocol() {
+	case buoyv1.Protocol_PROTOCOL_AMNEZIAWG, buoyv1.Protocol_PROTOCOL_UNSPECIFIED:
+	default:
+		return nil, status.Errorf(codes.Unimplemented,
+			"ListPeers: protocol %s not yet implemented", req.GetProtocol())
+	}
+	peers, err := s.awgManager.ListPeers(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "ListPeers: %v", err)
+	}
+	return &buoyv1.ListPeersResponse{Peers: peers}, nil
 }

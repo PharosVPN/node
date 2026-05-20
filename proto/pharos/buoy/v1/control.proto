@@ -155,13 +155,28 @@ message PushConfigRequest {
   Protocol protocol = 1;
   // revision is helm's monotonically increasing config revision.
   int64 revision = 2;
-  // config is the opaque, protocol-specific config document.
+  // config is the protocol-specific config document. The encoding is fixed
+  // per protocol so buoy can decode it without out-of-band knowledge:
+  //
+  //   - PROTOCOL_AMNEZIAWG: proto.Marshal of AmneziaWGConfig.
+  //   - PROTOCOL_XRAY_REALITY: TBD (B3).
+  //
+  // Unknown protocols return Unimplemented.
   bytes config = 3;
 }
 
 message PushConfigResponse {
   int64 applied_revision = 1;
   bool reloaded = 2;
+}
+
+// AmneziaWGConfig is the PushConfigRequest.config payload for
+// PROTOCOL_AMNEZIAWG: the full peer set helm wants the node to apply. The
+// node-level obfuscation parameters are intentionally absent — buoy owns
+// them (AmneziaWGObfuscation, decision-14 follow-up); helm sends peers,
+// nothing else.
+message AmneziaWGConfig {
+  repeated Peer peers = 1;
 }
 
 // NetworkConfig is a node's traffic-handling policy (DESIGN §3, decision 16).

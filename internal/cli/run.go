@@ -48,6 +48,19 @@ func newRunCmd() *cobra.Command {
 				"public_key", awgNode.PublicKey(),
 				"state_file", cfg.AWGStatePath())
 
+			awgManager, err := awg.NewManager(awg.ManagerOptions{
+				Node:         awgNode,
+				Runtime:      awg.NewExecRuntime(),
+				ConfPath:     awg.DefaultConfPath,
+				RevisionPath: cfg.AWGRevisionPath(),
+			})
+			if err != nil {
+				return err
+			}
+			log.Info("AmneziaWG manager ready",
+				"conf_path", awg.DefaultConfPath,
+				"applied_revision", awgManager.AppliedRevision())
+
 			srv, err := control.NewServer(control.Options{
 				ListenAddr:   cfg.Control.ListenAddr,
 				NodeCertPath: cfg.NodeCertPath(),
@@ -55,6 +68,7 @@ func newRunCmd() *cobra.Command {
 				CACertPath:   cfg.CACertPath(),
 				Version:      version,
 				AWGNode:      awgNode,
+				AWGManager:   awgManager,
 				Log:          log,
 			})
 			if err != nil {

@@ -93,6 +93,36 @@ Manages `awg-quick@awg0` (UDP 443) and `xray.service` (TCP 443). Peer
 add/remove must be **live** (no tunnel drop for other peers). Disk-full on a
 config write → return a typed error; the running data plane keeps last-known-good.
 
+### AmneziaWG data plane (B2)
+
+`buoy` owns `awg0.conf` at `/etc/amnezia/amneziawg/awg0.conf` (0600) — the conf
+is the source of truth helm pushes; every successful `AddPeer`/`RemovePeer`
+updates both `awg0` and the conf, so a buoy restart converges to the same
+state. The `[Interface]` block (private key, listen port, MTU, obfuscation
+lines) is rendered from `awg-node.json`; the `[Peer]` blocks come from helm
+and never include `Endpoint` — clients dial the node.
+
+`PushConfigRequest.config` for `PROTOCOL_AMNEZIAWG` is `proto.Marshal` of
+`AmneziaWGConfig { repeated Peer peers = 1; }` (canonical docs PR #11 /
+helm PR #28). The set of node-level obfuscation parameters is deliberately
+absent from `AmneziaWGConfig` — `helm` sends peers, never obfuscation, and a
+request that somehow carries them is ignored.
+
+Live-reload pattern: `awg-quick strip <conf> | awg syncconf awg0 /dev/stdin`
+(in-flight tunnels are not dropped). The first apply uses `awg-quick up`;
+`awg-quick down/up` remains the fallback. Single peer mutations go through
+`awg set awg0 peer <pubkey> ...`; `AddPeer` is an upsert, `RemovePeer` is
+idempotent on missing peers.
+
+Sensitive material — the node private key and per-peer PSKs — is supplied
+via on-disk conf (0600) or piped on stdin; it never appears on argv, in the
+environment, or in logs.
+
+`PushConfig.revision` is monotonically increasing. A revision below the last
+applied one is rejected with `FailedPrecondition`; an equal revision is an
+idempotent replay (no rewrite, `reloaded=false`). The last applied revision
+persists at `<config-dir>/awg-revision`.
+
 ## Reuse
 
 `buoy`'s control channel is a **plain mTLS gRPC server** — `helm` dials it
@@ -106,9 +136,9 @@ obey the rebrand rule in `docs/BUILD.md` §4 (strip every origin identifier).
 | # | Output |
 |---|---|
 | B1 | Repo skeleton, config loader, the `gen-csr`/`run`/`version` commands, mTLS `NodeControl` gRPC server skeleton (RPCs return `Unimplemented`). `GetStatus` is implemented early — it reports the per-node AmneziaWG identity + obfuscation set `helm` needs before it will provision devices. |
-| B2 | AmneziaWG management: `PushConfig`, `AddPeer`/`RemovePeer`, `ListPeers`; render the obfuscation set into `awg0.conf` `[Interface]` and apply |
+| B2 | AmneziaWG management: `PushConfig` (AmneziaWGConfig wire format), `AddPeer`/`RemovePeer` (live + conf, idempotent), `ListPeers` (conf joined with `awg show`); `GetStatus` reports the AmneziaWG `ServiceStatus`. Obfuscation comes from `awg-node.json` only. |
 | B3 | XRay management: `PushConfig`, `AddPeer`/`RemovePeer`, `ListPeers` |
-| B4 | `GetStatus` service health + `GetMetrics` |
+| B4 | `GetMetrics` |
 | B5 | `WatchEvents` server-stream |
 | B6 | Cold-start-from-disk + cloud-init packaging (static binary) |
 

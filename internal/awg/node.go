@@ -120,6 +120,13 @@ func (n *Node) PublicKey() string {
 	return base64.StdEncoding.EncodeToString(n.priv.PublicKey().Bytes())
 }
 
+// PrivateKey returns the node's AmneziaWG server private key, base64-encoded.
+// It is only consumed by the conf renderer that writes awg0.conf (0600); the
+// value must never appear in a log line, an argv slot, or a gRPC response.
+func (n *Node) PrivateKey() string {
+	return base64.StdEncoding.EncodeToString(n.priv.Bytes())
+}
+
 // Obfuscation returns a copy of the node's obfuscation parameter set.
 func (n *Node) Obfuscation() Obfuscation { return n.obfuscation }
 

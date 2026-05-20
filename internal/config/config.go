@@ -30,6 +30,9 @@ const (
 	// AWGStateFile holds the node's AmneziaWG server identity — its keypair
 	// and obfuscation set. buoy generates it once and reuses it (DESIGN §3).
 	AWGStateFile = "awg-node.json"
+	// AWGRevisionFile persists the last applied PushConfig revision so the
+	// optimistic-concurrency guard survives a restart.
+	AWGRevisionFile = "awg-revision"
 )
 
 // DefaultListenAddr is the TCP address the NodeControl server binds to. helm
@@ -71,6 +74,10 @@ func (c Config) CACertPath() string { return filepath.Join(c.Dir, CACertFile) }
 
 // AWGStatePath is the absolute path to the node's AmneziaWG identity file.
 func (c Config) AWGStatePath() string { return filepath.Join(c.Dir, AWGStateFile) }
+
+// AWGRevisionPath is the absolute path to the last-applied PushConfig
+// revision file.
+func (c Config) AWGRevisionPath() string { return filepath.Join(c.Dir, AWGRevisionFile) }
 
 // defaults returns the universal configuration, so a node with no buoy.yaml
 // still has a complete, valid Config.

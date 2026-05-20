@@ -121,11 +121,22 @@ func discardLogger() *slog.Logger {
 }
 
 // testOptions builds Server options for a node whose mTLS files live in dir.
+// It wires a minimal AmneziaWG Manager backed by a stub Runtime — enough for
+// GetStatus and the unimplemented RPCs in B2's test surface.
 func testOptions(t *testing.T, dir, addr string) Options {
 	t.Helper()
 	node, err := awg.Load(filepath.Join(dir, "awg-node.json"))
 	if err != nil {
 		t.Fatalf("awg.Load: %v", err)
+	}
+	mgr, err := awg.NewManager(awg.ManagerOptions{
+		Node:         node,
+		Runtime:      &stubRuntime{},
+		ConfPath:     filepath.Join(dir, "awg0.conf"),
+		RevisionPath: filepath.Join(dir, "awg-revision"),
+	})
+	if err != nil {
+		t.Fatalf("awg.NewManager: %v", err)
 	}
 	return Options{
 		ListenAddr:   addr,
@@ -134,9 +145,24 @@ func testOptions(t *testing.T, dir, addr string) Options {
 		CACertPath:   filepath.Join(dir, "ca.crt"),
 		Version:      "test-version",
 		AWGNode:      node,
+		AWGManager:   mgr,
 		Log:          discardLogger(),
 	}
 }
+
+// stubRuntime is a minimal awg.Runtime for control-level tests: it reports
+// the interface as down and answers Show with no peers. The data-plane
+// orchestration is tested under package awg with a richer fake.
+type stubRuntime struct{}
+
+func (stubRuntime) Up(context.Context, string) error       { return nil }
+func (stubRuntime) SyncConf(context.Context, string) error { return nil }
+func (stubRuntime) AddPeer(context.Context, string, string, []string) error {
+	return nil
+}
+func (stubRuntime) RemovePeer(context.Context, string) error     { return nil }
+func (stubRuntime) Show(context.Context) ([]awg.LivePeer, error) { return nil, nil }
+func (stubRuntime) Listening(context.Context) (bool, error)      { return false, nil }
 
 func freeAddr(t *testing.T) string {
 	t.Helper()
