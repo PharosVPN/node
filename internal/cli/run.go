@@ -12,6 +12,7 @@ import (
 	"github.com/PharosVPN/buoy/internal/awg"
 	"github.com/PharosVPN/buoy/internal/config"
 	"github.com/PharosVPN/buoy/internal/control"
+	"github.com/PharosVPN/buoy/internal/netpolicy"
 	"github.com/spf13/cobra"
 )
 
@@ -62,6 +63,19 @@ func newRunCmd() *cobra.Command {
 				"conf_path", awg.DefaultConfPath,
 				"applied_revision", awgManager.AppliedRevision())
 
+			// The network-policy applier owns the node's forwarding /
+			// masquerade / isolation firewall state (decision 16).
+			netPolicy, err := netpolicy.New(netpolicy.Options{
+				WGIface:   "awg0",
+				Exec:      netpolicy.SystemExec{},
+				Egress:    netpolicy.SystemEgress{},
+				StatePath: cfg.NetPolicyPath(),
+				Log:       log,
+			})
+			if err != nil {
+				return err
+			}
+
 			srv, err := control.NewServer(control.Options{
 				ListenAddr:   cfg.Control.ListenAddr,
 				NodeCertPath: cfg.NodeCertPath(),
@@ -70,6 +84,7 @@ func newRunCmd() *cobra.Command {
 				Version:      version,
 				AWGNode:      awgNode,
 				AWGManager:   awgManager,
+				NetPolicy:    netPolicy,
 				Log:          log,
 			})
 			if err != nil {
@@ -79,6 +94,12 @@ func newRunCmd() *cobra.Command {
 			// Shut down gracefully on SIGINT/SIGTERM — systemd sends SIGTERM.
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
+
+			// Cold start: re-establish the persisted network policy so a
+			// rebooted node restores its firewall before serving (decision 16).
+			if err := netPolicy.Reapply(ctx); err != nil {
+				return err
+			}
 
 			// Start the polling observer that feeds WatchEvents and the
 			// cumulative GetMetrics counters; it runs until ctx cancels.

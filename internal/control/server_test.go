@@ -23,11 +23,20 @@ import (
 
 	"github.com/PharosVPN/buoy/internal/awg"
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	"github.com/PharosVPN/buoy/internal/netpolicy"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/status"
 )
+
+// noopNetExec / noopNetEgress let the control tests build a real netpolicy
+// Applier without touching the system firewall.
+type noopNetExec struct{}
+
+func (noopNetExec) Run(context.Context, []string) error { return nil }
+
+type noopNetEgress struct{}
+
+func (noopNetEgress) DefaultEgress(context.Context) (string, error) { return "eth0", nil }
 
 // TestServeAcceptsMutualTLS proves a client whose certificate chains to the
 // CA reaches the service, and that GetStatus reports the node's AmneziaWG
@@ -72,12 +81,14 @@ func TestServeAcceptsMutualTLS(t *testing.T) {
 		t.Errorf("amneziawg.obfuscation invalid: %+v", obf)
 	}
 
-	// Unimplemented RPCs still return a clean Unimplemented over mTLS.
-	// SetNetworkConfig (decision 16) is a later-milestone RPC.
-	_, err = buoyv1.NewNodeControlClient(conn).SetNetworkConfig(context.Background(),
+	// SetNetworkConfig (decision 16) is implemented: an empty policy (forward
+	// off) applies cleanly with no rules.
+	npResp, err := buoyv1.NewNodeControlClient(conn).SetNetworkConfig(context.Background(),
 		&buoyv1.SetNetworkConfigRequest{Config: &buoyv1.NetworkConfig{}})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("SetNetworkConfig: got %v, want Unimplemented", err)
+	if err != nil {
+		t.Errorf("SetNetworkConfig: %v", err)
+	} else if !npResp.GetApplied() {
+		t.Error("SetNetworkConfig: applied = false, want true")
 	}
 }
 
@@ -140,6 +151,16 @@ func testOptions(t *testing.T, dir, addr string) Options {
 	if err != nil {
 		t.Fatalf("awg.NewManager: %v", err)
 	}
+	netPol, err := netpolicy.New(netpolicy.Options{
+		WGIface:   "awg0",
+		Exec:      noopNetExec{},
+		Egress:    noopNetEgress{},
+		StatePath: filepath.Join(dir, "netpolicy.json"),
+		Log:       discardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("netpolicy.New: %v", err)
+	}
 	return Options{
 		ListenAddr:   addr,
 		NodeCertPath: filepath.Join(dir, "node.crt"),
@@ -148,6 +169,7 @@ func testOptions(t *testing.T, dir, addr string) Options {
 		Version:      "test-version",
 		AWGNode:      node,
 		AWGManager:   mgr,
+		NetPolicy:    netPol,
 		Log:          discardLogger(),
 	}
 }

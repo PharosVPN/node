@@ -1,0 +1,305 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 The PharosVPN Authors
+
+package netpolicy
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"reflect"
+	"testing"
+)
+
+// TestRulesCanonical pins the exact canonical rule set. These strings are the
+// cross-repo contract with coxswain/internal/netpolicy — if this test changes,
+// coxswain's matching test must change identically, or buoy and coxswain will
+// disagree on what a policy means.
+func TestRulesCanonical(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy Policy
+		want   Rules
+	}{
+		{
+			name:   "no forwarding yields no rules",
+			policy: Policy{},
+			want:   Rules{},
+		},
+		{
+			name:   "forwarding only",
+			policy: Policy{Forwarding: true},
+			want: Rules{
+				PreUp: []string{
+					"sysctl -w net.ipv4.conf.all.forwarding=1",
+					"sysctl -w net.ipv6.conf.all.forwarding=1",
+				},
+				PostUp: []string{
+					"iptables -A FORWARD -i %i -j ACCEPT",
+					"iptables -A FORWARD -o %i -j ACCEPT",
+				},
+				PostDown: []string{
+					"iptables -D FORWARD -i %i -j ACCEPT",
+					"iptables -D FORWARD -o %i -j ACCEPT",
+				},
+			},
+		},
+		{
+			name:   "forwarding + masquerade",
+			policy: Policy{Forwarding: true, Masquerade: true},
+			want: Rules{
+				PreUp: []string{
+					"sysctl -w net.ipv4.conf.all.forwarding=1",
+					"sysctl -w net.ipv6.conf.all.forwarding=1",
+				},
+				PostUp: []string{
+					"iptables -A FORWARD -i %i -j ACCEPT",
+					"iptables -A FORWARD -o %i -j ACCEPT",
+					"iptables -t nat -A POSTROUTING -o %e -j MASQUERADE",
+				},
+				PostDown: []string{
+					"iptables -D FORWARD -i %i -j ACCEPT",
+					"iptables -D FORWARD -o %i -j ACCEPT",
+					"iptables -t nat -D POSTROUTING -o %e -j MASQUERADE",
+				},
+			},
+		},
+		{
+			name:   "forwarding + isolation places drop first",
+			policy: Policy{Forwarding: true, Isolation: true},
+			want: Rules{
+				PreUp: []string{
+					"sysctl -w net.ipv4.conf.all.forwarding=1",
+					"sysctl -w net.ipv6.conf.all.forwarding=1",
+				},
+				PostUp: []string{
+					"iptables -I FORWARD 1 -i %i -o %i -j DROP",
+					"iptables -A FORWARD -i %i -j ACCEPT",
+					"iptables -A FORWARD -o %i -j ACCEPT",
+				},
+				PostDown: []string{
+					"iptables -D FORWARD -i %i -o %i -j DROP",
+					"iptables -D FORWARD -i %i -j ACCEPT",
+					"iptables -D FORWARD -o %i -j ACCEPT",
+				},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.policy.Rules()
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Rules() mismatch\n got: %#v\nwant: %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidate(t *testing.T) {
+	if err := (Policy{Masquerade: true}).Validate(); !errors.Is(err, ErrMasqueradeNeedsForwarding) {
+		t.Errorf("masquerade without forwarding: got %v", err)
+	}
+	if err := (Policy{Isolation: true}).Validate(); !errors.Is(err, ErrIsolationNeedsForwarding) {
+		t.Errorf("isolation without forwarding: got %v", err)
+	}
+	if err := (Policy{Forwarding: true, Masquerade: true, Isolation: true}).Validate(); err != nil {
+		t.Errorf("valid policy rejected: %v", err)
+	}
+}
+
+func TestResolveSubstitutesTokens(t *testing.T) {
+	rr := Policy{Forwarding: true, Masquerade: true}.resolve("awg0", "eth0")
+	// The masquerade up-rule must carry the egress interface, not the token.
+	wantUp := command{"iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"}
+	if got := rr.up[len(rr.up)-1]; !reflect.DeepEqual(got, wantUp) {
+		t.Errorf("masquerade up: got %v want %v", got, wantUp)
+	}
+	// The forward accept must carry the wg interface.
+	wantForward := command{"iptables", "-A", "FORWARD", "-i", "awg0", "-j", "ACCEPT"}
+	if got := rr.up[2]; !reflect.DeepEqual(got, wantForward) {
+		t.Errorf("forward accept: got %v want %v", got, wantForward)
+	}
+}
+
+// fakeExec records every command and can be told to fail on a chosen one.
+type fakeExec struct {
+	runs     [][]string
+	failOn   string // substring; if a command joins to contain it, Run errors
+	missOnDel bool  // delete commands (-D) error, simulating "rule not present"
+}
+
+func (f *fakeExec) Run(_ context.Context, argv []string) error {
+	joined := ""
+	for _, a := range argv {
+		joined += a + " "
+	}
+	f.runs = append(f.runs, append([]string(nil), argv...))
+	if f.failOn != "" && contains(joined, f.failOn) {
+		return errors.New("forced failure")
+	}
+	if f.missOnDel && containsArg(argv, "-D") {
+		return errors.New("iptables: Bad rule (does a matching rule exist?)")
+	}
+	return nil
+}
+
+type fakeEgress struct{ iface string }
+
+func (f fakeEgress) DefaultEgress(context.Context) (string, error) { return f.iface, nil }
+
+func contains(s, sub string) bool {
+	return len(sub) > 0 && len(s) >= len(sub) && indexOf(s, sub) >= 0
+}
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+func containsArg(argv []string, want string) bool {
+	for _, a := range argv {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func newTestApplier(t *testing.T, ex Exec, eg EgressDetector) *Applier {
+	t.Helper()
+	a, err := New(Options{
+		WGIface:   "awg0",
+		Exec:      ex,
+		Egress:    eg,
+		StatePath: filepath.Join(t.TempDir(), "netpolicy.json"),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return a
+}
+
+func TestApplyInstallsRules(t *testing.T) {
+	ex := &fakeExec{}
+	a := newTestApplier(t, ex, fakeEgress{"eth0"})
+	if err := a.Apply(context.Background(), Policy{Forwarding: true, Masquerade: true}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	// Expect: 2 sysctl + 2 forward-accept + 1 masquerade = 5 up commands.
+	if len(ex.runs) != 5 {
+		t.Fatalf("want 5 commands, got %d: %v", len(ex.runs), ex.runs)
+	}
+	if got := a.Policy(); got != (Policy{Forwarding: true, Masquerade: true}) {
+		t.Errorf("Policy() = %+v", got)
+	}
+}
+
+func TestApplyRevertsPreviousFirst(t *testing.T) {
+	ex := &fakeExec{}
+	a := newTestApplier(t, ex, fakeEgress{"eth0"})
+	ctx := context.Background()
+	if err := a.Apply(ctx, Policy{Forwarding: true, Masquerade: true}); err != nil {
+		t.Fatalf("first Apply: %v", err)
+	}
+	ex.runs = nil
+	// Re-apply a narrower policy: the masquerade teardown from the first
+	// policy must run before the new rules install.
+	if err := a.Apply(ctx, Policy{Forwarding: true}); err != nil {
+		t.Fatalf("second Apply: %v", err)
+	}
+	sawMasqDelete := false
+	for _, r := range ex.runs {
+		if containsArg(r, "MASQUERADE") && containsArg(r, "-D") {
+			sawMasqDelete = true
+		}
+	}
+	if !sawMasqDelete {
+		t.Errorf("expected masquerade teardown on policy change, runs: %v", ex.runs)
+	}
+}
+
+func TestApplyRollsBackOnFailure(t *testing.T) {
+	// Fail when installing the masquerade rule; the forward-accept rules
+	// already applied must be torn back down.
+	ex := &fakeExec{failOn: "MASQUERADE"}
+	a := newTestApplier(t, ex, fakeEgress{"eth0"})
+	err := a.Apply(context.Background(), Policy{Forwarding: true, Masquerade: true})
+	if err == nil {
+		t.Fatal("expected Apply to fail")
+	}
+	// Nothing should be recorded as the applied policy.
+	if got := a.Policy(); got != (Policy{}) {
+		t.Errorf("policy should be unset after failed apply, got %+v", got)
+	}
+	// Rollback should have issued delete commands.
+	sawDelete := false
+	for _, r := range ex.runs {
+		if containsArg(r, "-D") {
+			sawDelete = true
+		}
+	}
+	if !sawDelete {
+		t.Errorf("expected rollback deletes after failure, runs: %v", ex.runs)
+	}
+}
+
+func TestReapplyAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "netpolicy.json")
+	ctx := context.Background()
+
+	// First process applies a policy and persists it.
+	a1, err := New(Options{WGIface: "awg0", Exec: &fakeExec{}, Egress: fakeEgress{"eth0"}, StatePath: statePath})
+	if err != nil {
+		t.Fatalf("New a1: %v", err)
+	}
+	if err := a1.Apply(ctx, Policy{Forwarding: true, Masquerade: true}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	// Second process (restart): loads state, Reapply re-establishes the policy.
+	ex2 := &fakeExec{missOnDel: true} // post-reboot: old rules gone, deletes miss
+	a2, err := New(Options{WGIface: "awg0", Exec: ex2, Egress: fakeEgress{"eth0"}, StatePath: statePath})
+	if err != nil {
+		t.Fatalf("New a2: %v", err)
+	}
+	if got := a2.Policy(); got != (Policy{Forwarding: true, Masquerade: true}) {
+		t.Fatalf("loaded policy = %+v", got)
+	}
+	if err := a2.Reapply(ctx); err != nil {
+		t.Fatalf("Reapply: %v", err)
+	}
+	// Reapply must (best-effort) revert then install: at least one MASQUERADE -A.
+	sawMasqAdd := false
+	for _, r := range ex2.runs {
+		if containsArg(r, "MASQUERADE") && containsArg(r, "-A") {
+			sawMasqAdd = true
+		}
+	}
+	if !sawMasqAdd {
+		t.Errorf("Reapply did not reinstall masquerade, runs: %v", ex2.runs)
+	}
+}
+
+func TestReapplyNoStateIsNoop(t *testing.T) {
+	ex := &fakeExec{}
+	a := newTestApplier(t, ex, fakeEgress{"eth0"})
+	if err := a.Reapply(context.Background()); err != nil {
+		t.Fatalf("Reapply with no state: %v", err)
+	}
+	if len(ex.runs) != 0 {
+		t.Errorf("Reapply with no state ran commands: %v", ex.runs)
+	}
+}
+
+func TestParseEgressDev(t *testing.T) {
+	out := "default via 10.0.0.1 dev eth0 proto dhcp metric 100\n"
+	if got := parseEgressDev(out); got != "eth0" {
+		t.Errorf("parseEgressDev = %q want eth0", got)
+	}
+	if got := parseEgressDev("unreachable default\n"); got != "" {
+		t.Errorf("parseEgressDev with no dev = %q want empty", got)
+	}
+}

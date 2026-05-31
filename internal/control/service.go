@@ -10,6 +10,7 @@ import (
 
 	"github.com/PharosVPN/buoy/internal/awg"
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	"github.com/PharosVPN/buoy/internal/netpolicy"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -22,9 +23,9 @@ import (
 // PushConfig, AddPeer, RemovePeer, ListPeers manage the AmneziaWG peer set
 // (B2). GetMetrics reports counters (B4) — totals from the conf+live join
 // plus cumulative handshakes_total / errors_total fed by the observer.
-// WatchEvents streams the observer's live events (B5). XRay management
-// lands in B3 — those calls return Unimplemented for now;
-// SetNetworkConfig (decision 16) ships in a later milestone.
+// WatchEvents streams the observer's live events (B5). SetNetworkConfig applies
+// the node's forwarding / masquerade / isolation policy (decision 16). XRay
+// management lands in B3 — those calls return Unimplemented for now.
 type service struct {
 	buoyv1.UnimplementedNodeControlServer
 
@@ -32,15 +33,17 @@ type service struct {
 	started    time.Time
 	awgNode    *awg.Node
 	awgManager *awg.Manager
+	netPolicy  *netpolicy.Applier
 }
 
 // newService returns a NodeControl service implementation.
-func newService(version string, awgNode *awg.Node, awgManager *awg.Manager) *service {
+func newService(version string, awgNode *awg.Node, awgManager *awg.Manager, netPolicy *netpolicy.Applier) *service {
 	return &service{
 		version:    version,
 		started:    time.Now(),
 		awgNode:    awgNode,
 		awgManager: awgManager,
+		netPolicy:  netPolicy,
 	}
 }
 
@@ -188,6 +191,30 @@ func (s *service) RemovePeer(ctx context.Context, req *buoyv1.RemovePeerRequest)
 		return nil, status.Errorf(codes.Internal, "RemovePeer: %v", err)
 	}
 	return &buoyv1.PeerResponse{Applied: applied}, nil
+}
+
+// SetNetworkConfig applies the node's forwarding / masquerade / isolation
+// policy (DESIGN §3, decision 16). coxswain sends the policy as three bools;
+// buoy renders the canonical rule set, substitutes its own interface names, and
+// applies it live (netfilter/sysctl only — established tunnels are not
+// dropped). The policy is persisted so it is re-established on cold start.
+func (s *service) SetNetworkConfig(ctx context.Context, req *buoyv1.SetNetworkConfigRequest) (*buoyv1.SetNetworkConfigResponse, error) {
+	cfg := req.GetConfig()
+	if cfg == nil {
+		return nil, status.Error(codes.InvalidArgument, "SetNetworkConfig: missing config")
+	}
+	p := netpolicy.Policy{
+		Forwarding: cfg.GetForwarding(),
+		Masquerade: cfg.GetMasquerade(),
+		Isolation:  cfg.GetIsolation(),
+	}
+	if err := p.Validate(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "SetNetworkConfig: %v", err)
+	}
+	if err := s.netPolicy.Apply(ctx, p); err != nil {
+		return nil, status.Errorf(codes.Internal, "SetNetworkConfig: %v", err)
+	}
+	return &buoyv1.SetNetworkConfigResponse{Applied: true}, nil
 }
 
 // ListPeers returns configured peers joined with their live state on awg0.

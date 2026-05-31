@@ -33,6 +33,11 @@ const (
 	// AWGRevisionFile persists the last applied PushConfig revision so the
 	// optimistic-concurrency guard survives a restart.
 	AWGRevisionFile = "awg-revision"
+	// NetPolicyFile persists the last-applied network policy (forwarding /
+	// masquerade / isolation) and the exact teardown commands for it, so the
+	// node re-establishes its firewall state on cold start and can revert the
+	// previous rules before applying a new policy. It carries no secrets.
+	NetPolicyFile = "netpolicy.json"
 )
 
 // DefaultListenAddr is the TCP address the NodeControl server binds to. coxswain
@@ -78,6 +83,9 @@ func (c Config) AWGStatePath() string { return filepath.Join(c.Dir, AWGStateFile
 // AWGRevisionPath is the absolute path to the last-applied PushConfig
 // revision file.
 func (c Config) AWGRevisionPath() string { return filepath.Join(c.Dir, AWGRevisionFile) }
+
+// NetPolicyPath is the absolute path to the persisted network-policy state.
+func (c Config) NetPolicyPath() string { return filepath.Join(c.Dir, NetPolicyFile) }
 
 // defaults returns the universal configuration, so a node with no buoy.yaml
 // still has a complete, valid Config.
