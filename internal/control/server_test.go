@@ -18,6 +18,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +26,9 @@ import (
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
 	"github.com/PharosVPN/buoy/internal/netpolicy"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
 
 // noopNetExec / noopNetEgress let the control tests build a real netpolicy
@@ -89,6 +92,96 @@ func TestServeAcceptsMutualTLS(t *testing.T) {
 		t.Errorf("SetNetworkConfig: %v", err)
 	} else if !npResp.GetApplied() {
 		t.Error("SetNetworkConfig: applied = false, want true")
+	}
+}
+
+// TestServeInnerLink exercises the node-cascade inner-link RPCs end to end over
+// mTLS: configure an inner link toward an exit (the entry dials it), reject a
+// config with no endpoint, then tear the link down.
+func TestServeInnerLink(t *testing.T) {
+	ca := newTestCA(t)
+	dir := t.TempDir()
+	ca.writeNodeFiles(t, dir)
+	addr := freeAddr(t)
+
+	srv, err := NewServer(testOptions(t, dir, addr))
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Serve: %v", err)
+		}
+	})
+
+	client := buoyv1.NewNodeControlClient(dial(t, addr, ca.clientCreds(t)))
+
+	// A valid exit obfuscation set: distinct H >= 5, Jmin <= Jmax, S2 != S1+56.
+	exitObf := &buoyv1.AmneziaWGObfuscation{
+		Jc: 5, Jmin: 25, Jmax: 800, S1: 20, S2: 30, S3: 40, S4: 50,
+		H1: 10, H2: 11, H3: 12, H4: 13,
+	}
+	resp, err := client.ConfigureInnerLink(context.Background(), &buoyv1.ConfigureInnerLinkRequest{
+		Revision: 1,
+		Config: &buoyv1.InnerLinkConfig{
+			Interface:       "awg1",
+			ListenPort:      51820,
+			Mtu:             1380,
+			PeerObfuscation: exitObf,
+			Exit: &buoyv1.Peer{
+				Protocol:   buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+				PublicKey:  "EXITPUB=",
+				AllowedIps: []string{"0.0.0.0/0"},
+				Endpoints:  []string{"198.51.100.9:443"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ConfigureInnerLink: %v", err)
+	}
+	if resp.GetAppliedRevision() != 1 || !resp.GetReloaded() {
+		t.Errorf("ConfigureInnerLink resp = %+v, want applied=1 reloaded=true", resp)
+	}
+
+	// The inner conf carries the exit endpoint and the exit's obfuscation.
+	raw, err := os.ReadFile(filepath.Join(dir, "awg1.conf"))
+	if err != nil {
+		t.Fatalf("read awg1.conf: %v", err)
+	}
+	for _, want := range []string{"Endpoint = 198.51.100.9:443", "ListenPort = 51820", "H1 = 10"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("awg1.conf missing %q:\n%s", want, raw)
+		}
+	}
+
+	// An exit with no endpoint is rejected — the entry must know where to dial.
+	_, err = client.ConfigureInnerLink(context.Background(), &buoyv1.ConfigureInnerLinkRequest{
+		Revision: 1,
+		Config: &buoyv1.InnerLinkConfig{
+			Interface:       "awg2",
+			ListenPort:      51821,
+			PeerObfuscation: exitObf,
+			Exit:            &buoyv1.Peer{PublicKey: "X=", AllowedIps: []string{"0.0.0.0/0"}},
+		},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("ConfigureInnerLink without endpoint: got %v, want InvalidArgument", err)
+	}
+
+	// Teardown removes the interface and its conf.
+	rm, err := client.RemoveInnerLink(context.Background(), &buoyv1.RemoveInnerLinkRequest{Interface: "awg1"})
+	if err != nil {
+		t.Fatalf("RemoveInnerLink: %v", err)
+	}
+	if !rm.GetRemoved() {
+		t.Error("RemoveInnerLink: removed = false")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "awg1.conf")); !os.IsNotExist(err) {
+		t.Errorf("RemoveInnerLink must delete the conf, stat err = %v", err)
 	}
 }
 
@@ -168,9 +261,24 @@ func testOptions(t *testing.T, dir, addr string) Options {
 		CACertPath:   filepath.Join(dir, "ca.crt"),
 		Version:      "test-version",
 		AWGNode:      node,
-		AWGRegistry:  awg.NewRegistry(mgr),
+		AWGRegistry:  awg.NewRegistry(mgr, innerFactory(dir)),
 		NetPolicy:    netPol,
 		Log:          discardLogger(),
+	}
+}
+
+// innerFactory builds inner-link managers backed by the stub runtime, with
+// conf/revision under dir — the test analogue of run.go's production factory.
+func innerFactory(dir string) awg.ManagerFactory {
+	return func(iface string, spec awg.InterfaceSpec) (*awg.Manager, error) {
+		s := spec
+		return awg.NewManager(awg.ManagerOptions{
+			Interface:    iface,
+			Spec:         &s,
+			Runtime:      stubRuntime{},
+			ConfPath:     filepath.Join(dir, iface+".conf"),
+			RevisionPath: filepath.Join(dir, iface+"-revision"),
+		})
 	}
 }
 

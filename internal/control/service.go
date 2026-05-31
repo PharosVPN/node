@@ -223,6 +223,72 @@ func (s *service) SetNetworkConfig(ctx context.Context, req *buoyv1.SetNetworkCo
 	return &buoyv1.SetNetworkConfigResponse{Applied: true}, nil
 }
 
+// ConfigureInnerLink creates or updates a node→node inner AmneziaWG link on
+// this entry node toward an exit (DESIGN §3, node cascade). The inner interface
+// reuses this node's key but adopts the exit's listen port and obfuscation so
+// the handshake matches; the single peer is the exit, which this node dials.
+// Reconfiguring an existing link updates its peer set live (e.g. a new exit
+// endpoint); changing the link's obfuscation or port needs RemoveInnerLink
+// first.
+func (s *service) ConfigureInnerLink(ctx context.Context, req *buoyv1.ConfigureInnerLinkRequest) (*buoyv1.ConfigureInnerLinkResponse, error) {
+	cfg := req.GetConfig()
+	if cfg == nil {
+		return nil, status.Error(codes.InvalidArgument, "ConfigureInnerLink: missing config")
+	}
+	iface := cfg.GetInterface()
+	if iface == "" {
+		return nil, status.Error(codes.InvalidArgument, "ConfigureInnerLink: missing interface")
+	}
+	exit := cfg.GetExit()
+	if exit == nil || exit.GetPublicKey() == "" {
+		return nil, status.Error(codes.InvalidArgument, "ConfigureInnerLink: missing exit public_key")
+	}
+	if len(exit.GetEndpoints()) == 0 {
+		return nil, status.Error(codes.InvalidArgument,
+			"ConfigureInnerLink: exit needs an endpoint — the entry dials it")
+	}
+
+	obf := awg.ObfuscationFromProto(cfg.GetPeerObfuscation())
+	if err := obf.Validate(); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "ConfigureInnerLink: exit obfuscation: %v", err)
+	}
+	spec := s.awgNode.InnerLinkSpec(uint16(cfg.GetListenPort()), uint16(cfg.GetMtu()), obf)
+
+	m, err := s.awgReg.Ensure(iface, spec)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "ConfigureInnerLink: %v", err)
+	}
+
+	exitPeer := awg.ConfPeer{
+		PublicKey:    exit.GetPublicKey(),
+		PresharedKey: exit.GetPresharedKey(),
+		AllowedIPs:   append([]string(nil), exit.GetAllowedIps()...),
+		Endpoint:     awg.FirstEndpoint(exit.GetEndpoints()),
+	}
+	applied, reloaded, err := m.PushConfig(ctx, req.GetRevision(), []awg.ConfPeer{exitPeer})
+	if err != nil {
+		var stale awg.ErrStaleRevision
+		if errors.As(err, &stale) {
+			return nil, status.Errorf(codes.FailedPrecondition, "ConfigureInnerLink: %s", stale.Error())
+		}
+		return nil, status.Errorf(codes.Internal, "ConfigureInnerLink: %v", err)
+	}
+	return &buoyv1.ConfigureInnerLinkResponse{AppliedRevision: applied, Reloaded: reloaded}, nil
+}
+
+// RemoveInnerLink tears down a previously configured inner link: the interface
+// is brought down and its conf + revision removed. It is idempotent.
+func (s *service) RemoveInnerLink(ctx context.Context, req *buoyv1.RemoveInnerLinkRequest) (*buoyv1.RemoveInnerLinkResponse, error) {
+	iface := req.GetInterface()
+	if iface == "" {
+		return nil, status.Error(codes.InvalidArgument, "RemoveInnerLink: missing interface")
+	}
+	if err := s.awgReg.Remove(ctx, iface); err != nil {
+		return nil, status.Errorf(codes.Internal, "RemoveInnerLink: %v", err)
+	}
+	return &buoyv1.RemoveInnerLinkResponse{Removed: true}, nil
+}
+
 // ListPeers returns configured peers joined with their live state on awg0.
 // Filtering by XRay returns Unimplemented; PROTOCOL_UNSPECIFIED is treated
 // as AmneziaWG-only until B3 lands XRay.

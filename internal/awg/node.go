@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
 )
@@ -140,8 +139,7 @@ func (n *Node) Info() *buoyv1.AmneziaWGInfo {
 
 // Spec returns the node's own [Interface] inputs for the client interface
 // (awg0): its private key, the standard listen port and MTU, and its
-// obfuscation lines. A cascade inner link builds a different InterfaceSpec
-// (this node's key, but the exit node's port and obfuscation).
+// obfuscation lines.
 func (n *Node) Spec() InterfaceSpec {
 	return InterfaceSpec{
 		PrivateKey:  n.PrivateKey(),
@@ -151,27 +149,23 @@ func (n *Node) Spec() InterfaceSpec {
 	}
 }
 
-// RenderInterface renders the obfuscation parameters as the lines buoy adds to
-// the [Interface] section of awg0.conf. The data-plane writer that applies
-// awg0.conf (milestone B2) uses this so the served config matches exactly what
-// GetStatus reports.
+// InnerLinkSpec returns the [Interface] inputs for a cascade inner link toward
+// an exit node (DESIGN §3): this node's own private key (so the exit identifies
+// the entry), but the exit's listen port, the computed link MTU, and the exit's
+// obfuscation set — so the entry's handshake to the exit matches. A zero
+// listenPort or mtu falls back to the conf defaults.
+func (n *Node) InnerLinkSpec(listenPort, mtu uint16, exitObf Obfuscation) InterfaceSpec {
+	return InterfaceSpec{
+		PrivateKey:  n.PrivateKey(),
+		ListenPort:  listenPort,
+		MTU:         mtu,
+		Obfuscation: exitObf.Render(),
+	}
+}
+
+// RenderInterface renders the node's obfuscation parameters as the [Interface]
+// lines buoy writes to awg0.conf. The data-plane writer applies the conf so the
+// served config matches exactly what GetStatus reports.
 func (n *Node) RenderInterface() string {
-	o := n.obfuscation
-	var b strings.Builder
-	for _, kv := range []struct {
-		key string
-		val uint32
-	}{
-		{"Jc", o.Jc}, {"Jmin", o.Jmin}, {"Jmax", o.Jmax},
-		{"S1", o.S1}, {"S2", o.S2}, {"S3", o.S3}, {"S4", o.S4},
-		{"H1", o.H1}, {"H2", o.H2}, {"H3", o.H3}, {"H4", o.H4},
-	} {
-		fmt.Fprintf(&b, "%s = %d\n", kv.key, kv.val)
-	}
-	for i, tmpl := range []string{o.I1, o.I2, o.I3, o.I4, o.I5} {
-		if tmpl != "" {
-			fmt.Fprintf(&b, "I%d = %s\n", i+1, tmpl)
-		}
-	}
-	return b.String()
+	return n.obfuscation.Render()
 }

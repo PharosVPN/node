@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/PharosVPN/buoy/internal/awg"
@@ -64,8 +65,20 @@ func newRunCmd() *cobra.Command {
 				"applied_revision", awgManager.AppliedRevision())
 
 			// The registry owns awg0 (clients) plus any cascade inner-link
-			// interfaces the controller provisions at runtime (DESIGN §3).
-			awgReg := awg.NewRegistry(awgManager)
+			// interfaces the controller provisions at runtime (DESIGN §3). The
+			// factory builds an inner interface's manager with its own awg
+			// runtime and on-disk conf (<iface>.conf) + revision (<iface>-revision).
+			confDir := filepath.Dir(awg.DefaultConfPath)
+			awgReg := awg.NewRegistry(awgManager, func(iface string, spec awg.InterfaceSpec) (*awg.Manager, error) {
+				return awg.NewManager(awg.ManagerOptions{
+					Interface:    iface,
+					Spec:         &spec,
+					Runtime:      &awg.ExecRuntime{Interface: iface},
+					ConfPath:     filepath.Join(confDir, iface+".conf"),
+					RevisionPath: filepath.Join(cfg.Dir, iface+"-revision"),
+					Log:          log,
+				})
+			})
 
 			// The network-policy applier owns the node's forwarding /
 			// masquerade / isolation firewall state (decision 16).

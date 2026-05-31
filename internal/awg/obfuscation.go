@@ -15,6 +15,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"strings"
 
 	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
 )
@@ -156,6 +157,44 @@ func (o Obfuscation) toProto() *buoyv1.AmneziaWGObfuscation {
 		H1: o.H1, H2: o.H2, H3: o.H3, H4: o.H4,
 		I1: o.I1, I2: o.I2, I3: o.I3, I4: o.I4, I5: o.I5,
 	}
+}
+
+// ObfuscationFromProto converts a wire obfuscation set to the local form. Used
+// for a cascade inner link, whose [Interface] adopts the exit node's set so the
+// handshake to the exit matches (DESIGN §3).
+func ObfuscationFromProto(p *buoyv1.AmneziaWGObfuscation) Obfuscation {
+	if p == nil {
+		return Obfuscation{}
+	}
+	return Obfuscation{
+		Jc: p.GetJc(), Jmin: p.GetJmin(), Jmax: p.GetJmax(),
+		S1: p.GetS1(), S2: p.GetS2(), S3: p.GetS3(), S4: p.GetS4(),
+		H1: p.GetH1(), H2: p.GetH2(), H3: p.GetH3(), H4: p.GetH4(),
+		I1: p.GetI1(), I2: p.GetI2(), I3: p.GetI3(), I4: p.GetI4(), I5: p.GetI5(),
+	}
+}
+
+// Render renders the obfuscation parameters as the lines buoy writes into the
+// [Interface] section of a conf. The data-plane writer applies the conf so the
+// served config matches exactly what GetStatus reports.
+func (o Obfuscation) Render() string {
+	var b strings.Builder
+	for _, kv := range []struct {
+		key string
+		val uint32
+	}{
+		{"Jc", o.Jc}, {"Jmin", o.Jmin}, {"Jmax", o.Jmax},
+		{"S1", o.S1}, {"S2", o.S2}, {"S3", o.S3}, {"S4", o.S4},
+		{"H1", o.H1}, {"H2", o.H2}, {"H3", o.H3}, {"H4", o.H4},
+	} {
+		fmt.Fprintf(&b, "%s = %d\n", kv.key, kv.val)
+	}
+	for i, tmpl := range []string{o.I1, o.I2, o.I3, o.I4, o.I5} {
+		if tmpl != "" {
+			fmt.Fprintf(&b, "I%d = %s\n", i+1, tmpl)
+		}
+	}
+	return b.String()
 }
 
 // randRange returns a uniform random uint32 in the inclusive range [lo, hi].

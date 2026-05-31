@@ -31,7 +31,7 @@ func newIfaceManager(t *testing.T, dir, iface string, spec InterfaceSpec) (*Mana
 
 func TestRegistryPrimaryAddGet(t *testing.T) {
 	primary, _ := newTestManager(t) // awg0
-	reg := NewRegistry(primary)
+	reg := NewRegistry(primary, nil)
 
 	if reg.Primary() != primary {
 		t.Fatal("Primary() did not return the seeded manager")
@@ -56,9 +56,44 @@ func TestRegistryPrimaryAddGet(t *testing.T) {
 	}
 }
 
+func TestRegistryEnsureCreatesViaFactory(t *testing.T) {
+	primary, _ := newTestManager(t)
+	dir := t.TempDir()
+	calls := 0
+	factory := func(iface string, spec InterfaceSpec) (*Manager, error) {
+		calls++
+		m, _ := newIfaceManager(t, dir, iface, spec)
+		return m, nil
+	}
+	reg := NewRegistry(primary, factory)
+
+	m1, err := reg.Ensure("awg1", InterfaceSpec{PrivateKey: "K=", ListenPort: 51820})
+	if err != nil {
+		t.Fatalf("Ensure(awg1): %v", err)
+	}
+	// A second Ensure for the same interface returns the existing manager
+	// without invoking the factory again.
+	m2, err := reg.Ensure("awg1", InterfaceSpec{PrivateKey: "K=", ListenPort: 51820})
+	if err != nil {
+		t.Fatalf("Ensure(awg1) again: %v", err)
+	}
+	if m1 != m2 || calls != 1 {
+		t.Errorf("Ensure should be idempotent: same=%v calls=%d", m1 == m2, calls)
+	}
+	// Ensure on the primary name is rejected.
+	if _, err := reg.Ensure("awg0", InterfaceSpec{}); err == nil {
+		t.Error("Ensure on the primary interface must be rejected")
+	}
+	// With no factory, Ensure of a new interface errors.
+	noFactory := NewRegistry(primary, nil)
+	if _, err := noFactory.Ensure("awg2", InterfaceSpec{}); err == nil {
+		t.Error("Ensure with no factory must error")
+	}
+}
+
 func TestRegistryRemovePrimaryRejected(t *testing.T) {
 	primary, _ := newTestManager(t)
-	reg := NewRegistry(primary)
+	reg := NewRegistry(primary, nil)
 	if err := reg.Remove(context.Background(), "awg0"); err == nil {
 		t.Error("removing the primary interface must be rejected")
 	}
@@ -70,7 +105,7 @@ func TestRegistryRemovePrimaryRejected(t *testing.T) {
 
 func TestRegistryRemoveTearsDownInterface(t *testing.T) {
 	primary, _ := newTestManager(t)
-	reg := NewRegistry(primary)
+	reg := NewRegistry(primary, nil)
 	dir := t.TempDir()
 	inner, rt := newIfaceManager(t, dir, "awg1", InterfaceSpec{PrivateKey: "K=", ListenPort: 51820})
 	if err := reg.Add(inner); err != nil {
