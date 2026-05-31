@@ -95,11 +95,19 @@ func newRunCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
-			// Cold start: re-establish the persisted network policy so a
-			// rebooted node restores its firewall before serving (decision 16).
+			// Cold start: re-establish the persisted network policy and bring
+			// the data plane up from the on-disk conf, so a rebooted node
+			// restores its firewall and tunnels before serving — existing
+			// peers keep working even if coxswain is unreachable (DESIGN §3).
 			if err := netPolicy.Reapply(ctx); err != nil {
 				return err
 			}
+			if err := awgManager.Reconcile(ctx); err != nil {
+				return err
+			}
+			log.Info("cold-start reconcile complete",
+				"network_policy", netPolicy.Policy(),
+				"applied_revision", awgManager.AppliedRevision())
 
 			// Start the polling observer that feeds WatchEvents and the
 			// cumulative GetMetrics counters; it runs until ctx cancels.

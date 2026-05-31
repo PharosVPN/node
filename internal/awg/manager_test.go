@@ -416,3 +416,90 @@ func TestStatusReportsDownThenUp(t *testing.T) {
 		t.Errorf("peer count = %d, want 1", count)
 	}
 }
+
+// --- Reconcile (cold start) -------------------------------------------------
+
+// TestReconcileBringsUpFromDisk proves a rebooted node re-establishes its
+// tunnels from the persisted conf without a fresh PushConfig: a new Manager
+// over an existing conf, with the interface down, brings it up.
+func TestReconcileBringsUpFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	node := mustLoadNode(t)
+	confPath := filepath.Join(dir, "awg0.conf")
+	revPath := filepath.Join(dir, "awg-revision")
+	ctx := context.Background()
+
+	// First process: push a config, which writes the conf and brings awg0 up.
+	mgr1, err := NewManager(ManagerOptions{Node: node, Runtime: newFakeRuntime(), ConfPath: confPath, RevisionPath: revPath})
+	if err != nil {
+		t.Fatalf("NewManager 1: %v", err)
+	}
+	if _, _, err := mgr1.PushConfig(ctx, 1, []ConfPeer{
+		{PublicKey: "PUB=", AllowedIPs: []string{"10.0.0.2/32"}},
+	}); err != nil {
+		t.Fatalf("PushConfig: %v", err)
+	}
+
+	// Reboot: a fresh Manager over the same paths with a down interface.
+	rt2 := newFakeRuntime() // listening defaults to false
+	mgr2, err := NewManager(ManagerOptions{Node: node, Runtime: rt2, ConfPath: confPath, RevisionPath: revPath})
+	if err != nil {
+		t.Fatalf("NewManager 2: %v", err)
+	}
+	if err := mgr2.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if rt2.callCount("Up") != 1 {
+		t.Errorf("Reconcile must bring the interface up from disk: Up calls = %d, want 1", rt2.callCount("Up"))
+	}
+	// The persisted revision survives the restart.
+	if mgr2.AppliedRevision() != 1 {
+		t.Errorf("applied revision = %d, want 1 (persisted)", mgr2.AppliedRevision())
+	}
+}
+
+// TestReconcileLiveReloadsWhenAlreadyUp proves a plain process restart (awg0
+// still up) live-reloads rather than bouncing the interface.
+func TestReconcileLiveReloadsWhenAlreadyUp(t *testing.T) {
+	dir := t.TempDir()
+	node := mustLoadNode(t)
+	confPath := filepath.Join(dir, "awg0.conf")
+	revPath := filepath.Join(dir, "awg-revision")
+	ctx := context.Background()
+
+	mgr1, err := NewManager(ManagerOptions{Node: node, Runtime: newFakeRuntime(), ConfPath: confPath, RevisionPath: revPath})
+	if err != nil {
+		t.Fatalf("NewManager 1: %v", err)
+	}
+	if _, _, err := mgr1.PushConfig(ctx, 1, []ConfPeer{{PublicKey: "PUB=", AllowedIPs: []string{"10.0.0.2/32"}}}); err != nil {
+		t.Fatalf("PushConfig: %v", err)
+	}
+
+	rt2 := newFakeRuntime()
+	rt2.setListening(true) // interface still up across the restart
+	mgr2, err := NewManager(ManagerOptions{Node: node, Runtime: rt2, ConfPath: confPath, RevisionPath: revPath})
+	if err != nil {
+		t.Fatalf("NewManager 2: %v", err)
+	}
+	if err := mgr2.Reconcile(ctx); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if rt2.callCount("Up") != 0 {
+		t.Errorf("Reconcile must not bounce a live interface: Up calls = %d, want 0", rt2.callCount("Up"))
+	}
+	if rt2.callCount("SyncConf") != 1 {
+		t.Errorf("Reconcile on a live interface must SyncConf: calls = %d, want 1", rt2.callCount("SyncConf"))
+	}
+}
+
+// TestReconcileNoConfIsNoop proves a fresh node (nothing persisted) does
+// nothing on Reconcile.
+func TestReconcileNoConfIsNoop(t *testing.T) {
+	mgr, rt := newTestManager(t)
+	if err := mgr.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile on fresh node: %v", err)
+	}
+	if got := rt.callCount("Up") + rt.callCount("SyncConf"); got != 0 {
+		t.Errorf("Reconcile on fresh node ran %d apply calls, want 0", got)
+	}
+}

@@ -105,6 +105,28 @@ func NewManager(opts ManagerOptions) (*Manager, error) {
 	return m, nil
 }
 
+// Reconcile brings the data plane up from the on-disk conf at startup, so a
+// node that rebooted (or whose buoy process restarted) re-establishes its
+// tunnels from persisted state without waiting for coxswain to push again —
+// the controller-outage-survival guarantee (DESIGN §3). If no conf has been
+// written yet (a fresh node), it is a no-op. It never changes the applied
+// revision; it only mirrors the persisted conf onto the interface.
+func (m *Manager) Reconcile(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, err := os.Stat(m.confPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // fresh node — nothing persisted to bring up
+		}
+		return fmt.Errorf("awg: stat %s: %w", m.confPath, err)
+	}
+	// applyConf brings the interface up if it is down (the reboot case) or
+	// live-reloads it if it is already up (a plain process restart) — neither
+	// drops an established tunnel.
+	return m.applyConf(ctx)
+}
+
 // Start launches the polling observer in the background; it runs until ctx
 // cancels. Subscribers (WatchEvents streams) registered before Start get the
 // first poll's events too, but the first poll itself establishes the
