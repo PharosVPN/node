@@ -34,4 +34,4 @@ Go · gRPC server over mTLS · manages `awg-quick@awg0` and `xray.service`.
 
 ## License
 
-AGPL-3.0-or-later. Contributions under the DCO (`git commit -s`).
+Apache-2.0. Contributions under the DCO (`git commit -s`).
