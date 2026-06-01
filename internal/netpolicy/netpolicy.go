@@ -126,6 +126,17 @@ func (p Policy) Rules() Rules {
 	// the mark into the device's inner interface, and add a default route in
 	// that table. Transited packets egress the inner interface, so they never
 	// match the egress masquerade above — the exit node NATs them instead.
+	//
+	// A return from the exit arrives on the inner interface, but the route back
+	// to its source (the public destination) is the egress interface — an
+	// asymmetric path that reverse-path filtering drops, even in loose mode, so
+	// the entry silently fails to forward returns to the client. Relax rp_filter
+	// while the node carries transits. The effective value is max(all, iface),
+	// so `all` must be relaxed — relaxing only the inner interface is a no-op.
+	if len(p.Transits) > 0 {
+		r.PreUp = append(r.PreUp, "sysctl -w net.ipv4.conf.all.rp_filter=0")
+		r.PostDown = append(r.PostDown, "sysctl -w net.ipv4.conf.all.rp_filter=2")
+	}
 	for _, t := range p.Transits {
 		mark := strconv.FormatUint(uint64(t.Mark), 10)
 		table := strconv.FormatUint(uint64(t.Table), 10)

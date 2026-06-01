@@ -24,13 +24,14 @@ type fakeRuntime struct {
 	listening    bool
 	confPath     string
 	live         map[string]LivePeer
+	routes       map[string]bool // CIDRs with a device route installed
 	calls        []string
 	showErr      error  // injected; non-nil → Show returns this error
 	lastEndpoint string // endpoint passed to the most recent AddPeer
 }
 
 func newFakeRuntime() *fakeRuntime {
-	return &fakeRuntime{live: map[string]LivePeer{}}
+	return &fakeRuntime{live: map[string]LivePeer{}, routes: map[string]bool{}}
 }
 
 func (r *fakeRuntime) Up(_ context.Context, confPath string) error {
@@ -77,6 +78,22 @@ func (r *fakeRuntime) RemovePeer(_ context.Context, publicKey string) error {
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, "RemovePeer:"+publicKey)
 	delete(r.live, publicKey)
+	return nil
+}
+
+func (r *fakeRuntime) AddRoute(_ context.Context, cidr string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, "AddRoute:"+cidr)
+	r.routes[cidr] = true
+	return nil
+}
+
+func (r *fakeRuntime) RemoveRoute(_ context.Context, cidr string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, "RemoveRoute:"+cidr)
+	delete(r.routes, cidr)
 	return nil
 }
 
@@ -275,6 +292,64 @@ func TestRemovePeerIsIdempotent(t *testing.T) {
 	}
 	if rt.callCount("RemovePeer") != 2 {
 		t.Errorf("runtime.RemovePeer calls = %d, want 2", rt.callCount("RemovePeer"))
+	}
+}
+
+// TestPeerRoutesReconciled proves the route fix: a client peer added live gets
+// a kernel route for its allowed-ip (so return traffic reaches it), removing it
+// tears the route down, and a default-route peer (a cascade inner link's exit)
+// never gets a device route.
+func TestPeerRoutesReconciled(t *testing.T) {
+	mgr, rt := newTestManager(t)
+	ctx := context.Background()
+
+	if _, err := mgr.AddPeer(ctx, peer("p1", "PUBA=", "", "10.0.0.2/32")); err != nil {
+		t.Fatal(err)
+	}
+	if !rt.routes["10.0.0.2/32"] {
+		t.Errorf("AddPeer must install the client route, routes=%v", rt.routes)
+	}
+
+	// The inner-link exit peer carries 0.0.0.0/0 — it must NOT become a device
+	// route (that would hijack egress; the interface's Table=off + transit rules
+	// handle routing into it).
+	if _, err := mgr.AddPeer(ctx, peer("exit", "EXIT=", "", "0.0.0.0/0")); err != nil {
+		t.Fatal(err)
+	}
+	if rt.routes["0.0.0.0/0"] {
+		t.Errorf("default route must be skipped, routes=%v", rt.routes)
+	}
+
+	if _, err := mgr.RemovePeer(ctx, "PUBA="); err != nil {
+		t.Fatal(err)
+	}
+	if rt.routes["10.0.0.2/32"] {
+		t.Errorf("RemovePeer must tear the route down, routes=%v", rt.routes)
+	}
+}
+
+// TestPushConfigReconcilesRoutes proves a peer landing via PushConfig (which
+// uses SyncConf once the interface is up — and SyncConf installs no routes) is
+// still reachable: the manager reconciles the route itself.
+func TestPushConfigReconcilesRoutes(t *testing.T) {
+	mgr, rt := newTestManager(t)
+	ctx := context.Background()
+
+	// First push brings the interface up (Up); second pushes a new client over
+	// SyncConf — the path that historically left the route missing.
+	if _, _, err := mgr.PushConfig(ctx, 1, []ConfPeer{{PublicKey: "PUBA=", AllowedIPs: []string{"10.0.0.2/32"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := mgr.PushConfig(ctx, 2, []ConfPeer{
+		{PublicKey: "PUBA=", AllowedIPs: []string{"10.0.0.2/32"}},
+		{PublicKey: "PUBB=", AllowedIPs: []string{"10.0.0.3/32"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, cidr := range []string{"10.0.0.2/32", "10.0.0.3/32"} {
+		if !rt.routes[cidr] {
+			t.Errorf("PushConfig must reconcile route %s, routes=%v", cidr, rt.routes)
+		}
 	}
 }
 

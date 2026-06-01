@@ -294,6 +294,8 @@ func (stubRuntime) AddPeer(context.Context, string, string, []string, string) er
 	return nil
 }
 func (stubRuntime) RemovePeer(context.Context, string) error     { return nil }
+func (stubRuntime) AddRoute(context.Context, string) error       { return nil }
+func (stubRuntime) RemoveRoute(context.Context, string) error    { return nil }
 func (stubRuntime) Show(context.Context) ([]awg.LivePeer, error) { return nil, nil }
 func (stubRuntime) Listening(context.Context) (bool, error)      { return false, nil }
 

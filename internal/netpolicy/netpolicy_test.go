@@ -150,6 +150,25 @@ func TestTransitRulesCanonical(t *testing.T) {
 			t.Errorf("PostDown missing %q\n got: %#v", w, r.PostDown)
 		}
 	}
+
+	// A transit node forwards returns asymmetrically (in on the inner interface,
+	// route-back via egress), which rp_filter drops — so the cascade entry must
+	// relax it while it carries transits, and restore it on teardown.
+	if !containsLine(r.PreUp, "sysctl -w net.ipv4.conf.all.rp_filter=0") {
+		t.Errorf("PreUp missing the rp_filter relax\n got: %#v", r.PreUp)
+	}
+	if !containsLine(r.PostDown, "sysctl -w net.ipv4.conf.all.rp_filter=2") {
+		t.Errorf("PostDown missing the rp_filter restore\n got: %#v", r.PostDown)
+	}
+}
+
+// TestNoTransitOmitsRpFilter guards that a plain forwarding node (no cascade)
+// keeps reverse-path filtering — the relax is scoped to transit nodes only.
+func TestNoTransitOmitsRpFilter(t *testing.T) {
+	r := Policy{Forwarding: true, Masquerade: true}.Rules()
+	if containsLine(r.PreUp, "sysctl -w net.ipv4.conf.all.rp_filter=0") {
+		t.Errorf("non-transit node must not relax rp_filter\n got: %#v", r.PreUp)
+	}
 }
 
 func containsLine(lines []string, want string) bool {

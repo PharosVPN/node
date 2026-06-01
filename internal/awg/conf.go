@@ -27,6 +27,13 @@ type InterfaceSpec struct {
 	ListenPort  uint16
 	MTU         uint16
 	Obfuscation string
+	// Table sets awg-quick's `Table =` directive. Empty means the default
+	// (awg-quick installs routes for each peer's AllowedIPs). A cascade inner
+	// link sets it to "off": its exit peer has AllowedIPs 0.0.0.0/0, and we must
+	// NOT let awg-quick install a default route through the inner interface —
+	// that would hijack the node's own egress. The per-device transit rules
+	// (mangle MARK + ip rule + ip route) route cascaded devices into it instead.
+	Table string
 }
 
 // mtuOrDefault returns the spec MTU, or the package default when unset.
@@ -61,6 +68,9 @@ func renderConf(spec InterfaceSpec, peers []ConfPeer) string {
 	fmt.Fprintf(&b, "PrivateKey = %s\n", spec.PrivateKey)
 	fmt.Fprintf(&b, "ListenPort = %d\n", spec.ListenPort)
 	fmt.Fprintf(&b, "MTU = %d\n", spec.mtuOrDefault())
+	if spec.Table != "" {
+		fmt.Fprintf(&b, "Table = %s\n", spec.Table)
+	}
 	b.WriteString(spec.Obfuscation)
 
 	for _, p := range peers {

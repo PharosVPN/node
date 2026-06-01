@@ -160,6 +160,10 @@ func (n *Node) InnerLinkSpec(listenPort, mtu uint16, exitObf Obfuscation) Interf
 		ListenPort:  listenPort,
 		MTU:         mtu,
 		Obfuscation: exitObf.Render(),
+		// Table=off: do not let awg-quick install a default route for the inner
+		// link's 0.0.0.0/0 exit peer; the entry's transit rules route cascaded
+		// devices into it (DESIGN §3). Without this the node hijacks its own egress.
+		Table: "off",
 	}
 }
 

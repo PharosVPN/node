@@ -39,6 +39,16 @@ type Runtime interface {
 	// RemovePeer removes one peer live. Removing a peer that is not on the
 	// interface is not an error.
 	RemovePeer(ctx context.Context, publicKey string) error
+	// AddRoute installs a kernel route for cidr via this interface
+	// (`ip route replace <cidr> dev <iface>`), idempotently. `awg-quick up`
+	// installs a peer's allowed-ips as routes, but live peer changes over
+	// SyncConf or `awg set` do not — so the manager reconciles them explicitly,
+	// or the node cannot forward return traffic to a peer added after the
+	// interface came up. Default routes (0.0.0.0/0, ::/0) are never passed here.
+	AddRoute(ctx context.Context, cidr string) error
+	// RemoveRoute deletes a route previously added by AddRoute. A route that is
+	// not present is not an error.
+	RemoveRoute(ctx context.Context, cidr string) error
 	// Show returns awg0's live per-peer state (`awg show awg0 dump`).
 	Show(ctx context.Context) ([]LivePeer, error)
 	// Listening reports whether awg0 is up and bound.
@@ -179,6 +189,35 @@ func (r *ExecRuntime) RemovePeer(ctx context.Context, publicKey string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("awg set peer remove %s: %w (output: %s)",
 			redactPubkey(publicKey), err, redactOutput(out))
+	}
+	return nil
+}
+
+// AddRoute installs `ip route replace <cidr> dev <iface>` — idempotent: it adds
+// the route when absent and updates it when present.
+func (r *ExecRuntime) AddRoute(ctx context.Context, cidr string) error {
+	cmd := exec.CommandContext(ctx, "ip", "route", "replace", cidr, "dev", r.iface())
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("ip route replace %s dev %s: %w (output: %s)",
+			cidr, r.iface(), err, redactOutput(out))
+	}
+	return nil
+}
+
+// RemoveRoute runs `ip route del <cidr> dev <iface>`. A missing route — the
+// route was never installed, or already removed — is tolerated.
+func (r *ExecRuntime) RemoveRoute(ctx context.Context, cidr string) error {
+	cmd := exec.CommandContext(ctx, "ip", "route", "del", cidr, "dev", r.iface())
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// `ip route del` exits non-zero when the route is absent; teardown is
+		// idempotent, so treat that as success.
+		low := strings.ToLower(string(out))
+		if strings.Contains(low, "no such process") || strings.Contains(low, "not found") {
+			return nil
+		}
+		return fmt.Errorf("ip route del %s dev %s: %w (output: %s)",
+			cidr, r.iface(), err, redactOutput(out))
 	}
 	return nil
 }

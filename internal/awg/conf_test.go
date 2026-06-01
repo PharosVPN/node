@@ -117,6 +117,26 @@ func TestRenderConfInnerLinkEndpoint(t *testing.T) {
 	}
 }
 
+// TestInnerLinkDisablesAutoRouting guards against the inner link hijacking the
+// node's own egress: a cascade inner interface (0.0.0.0/0 exit peer) must set
+// `Table = off` so awg-quick installs no routes — the transit rules do the
+// per-device routing. The client interface (awg0) must NOT set Table.
+func TestInnerLinkDisablesAutoRouting(t *testing.T) {
+	node := mustLoadNode(t)
+
+	if got := renderConf(node.Spec(), nil); strings.Contains(got, "Table =") {
+		t.Errorf("client interface (awg0) must not set Table:\n%s", got)
+	}
+
+	inner := node.InnerLinkSpec(51820, 1340, node.Obfuscation())
+	conf := renderConf(inner, []ConfPeer{
+		{PublicKey: "EXIT=", AllowedIPs: []string{"0.0.0.0/0"}, Endpoint: "203.0.113.7:443"},
+	})
+	if !strings.Contains(conf, "Table = off") {
+		t.Errorf("inner link must set `Table = off`:\n%s", conf)
+	}
+}
+
 // TestParseConfPeersIgnoresInterface guards the buoy invariant: the
 // [Interface] section in awg0.conf is buoy-owned. coxswain-supplied obfuscation
 // values, even if smuggled into a pushed conf, must not be readable as peers.

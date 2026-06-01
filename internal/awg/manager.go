@@ -249,6 +249,11 @@ func (m *Manager) AddPeer(ctx context.Context, p *buoyv1.Peer) (bool, error) {
 	if err := m.runtime.AddPeer(ctx, cp.PublicKey, cp.PresharedKey, cp.AllowedIPs, cp.Endpoint); err != nil {
 		return false, err
 	}
+	// `awg set` adds the peer but, unlike `awg-quick up`, installs no route for
+	// its allowed-ips — without which return traffic to the peer is misrouted.
+	if err := m.addPeerRoutes(ctx, cp.AllowedIPs); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
@@ -265,17 +270,31 @@ func (m *Manager) RemovePeer(ctx context.Context, publicKey string) (bool, error
 	if err != nil {
 		return false, err
 	}
+	var removed *ConfPeer
 	filtered := make([]ConfPeer, 0, len(peers))
-	for _, p := range peers {
-		if p.PublicKey != publicKey {
-			filtered = append(filtered, p)
+	for i := range peers {
+		if peers[i].PublicKey == publicKey {
+			removed = &peers[i]
+			continue
 		}
+		filtered = append(filtered, peers[i])
 	}
 	if err := m.writeConf(filtered); err != nil {
 		return false, err
 	}
 	if err := m.runtime.RemovePeer(ctx, publicKey); err != nil {
 		return false, err
+	}
+	// Tear down the routes we installed for this peer's allowed-ips.
+	if removed != nil {
+		for _, cidr := range removed.AllowedIPs {
+			if isDefaultRoute(cidr) {
+				continue
+			}
+			if err := m.runtime.RemoveRoute(ctx, cidr); err != nil {
+				return false, err
+			}
+		}
 	}
 	return true, nil
 }
@@ -377,16 +396,45 @@ func (m *Manager) Status(ctx context.Context) (running, listening bool, peerCoun
 
 // applyConf reloads awg0 from the on-disk conf. The first call brings the
 // interface up; subsequent calls use SyncConf so established tunnels do not
-// drop.
+// drop. Either way it then reconciles the kernel routes for the configured
+// peers: `awg-quick up` installs them, but `awg syncconf` does not, so without
+// this a peer added by a later push has no route and return traffic to it is
+// misrouted (the route lookup falls through to the default — out the wrong
+// interface).
 func (m *Manager) applyConf(ctx context.Context) error {
 	up, err := m.runtime.Listening(ctx)
 	if err != nil {
 		return err
 	}
-	if !up {
-		return m.runtime.Up(ctx, m.confPath)
+	if up {
+		if err := m.runtime.SyncConf(ctx, m.confPath); err != nil {
+			return err
+		}
+	} else if err := m.runtime.Up(ctx, m.confPath); err != nil {
+		return err
 	}
-	return m.runtime.SyncConf(ctx, m.confPath)
+
+	peers, err := m.readPeers()
+	if err != nil {
+		return err
+	}
+	return m.addPeerRoutes(ctx, peersAllowedIPs(peers))
+}
+
+// addPeerRoutes installs a device route for every non-default CIDR. Default
+// routes (0.0.0.0/0, ::/0) are skipped: a cascade inner link's exit peer
+// carries 0.0.0.0/0 but must not install a default route (its interface sets
+// `Table = off`); the transit rules route cascaded devices into it instead.
+func (m *Manager) addPeerRoutes(ctx context.Context, cidrs []string) error {
+	for _, cidr := range cidrs {
+		if isDefaultRoute(cidr) {
+			continue
+		}
+		if err := m.runtime.AddRoute(ctx, cidr); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // readPeers returns the [Peer] sections from awg0.conf, or an empty slice if
@@ -433,6 +481,27 @@ func FirstEndpoint(endpoints []string) string {
 		}
 	}
 	return ""
+}
+
+// peersAllowedIPs flattens the allowed-ips across all peers, in conf order.
+func peersAllowedIPs(peers []ConfPeer) []string {
+	var cidrs []string
+	for _, p := range peers {
+		cidrs = append(cidrs, p.AllowedIPs...)
+	}
+	return cidrs
+}
+
+// isDefaultRoute reports whether cidr is a default route. A peer's 0.0.0.0/0 (a
+// cascade inner link's exit peer) must never be installed as a device route —
+// that is awg-quick's Table directive's job, and on the inner link it is
+// deliberately suppressed (`Table = off`).
+func isDefaultRoute(cidr string) bool {
+	switch strings.TrimSpace(cidr) {
+	case "0.0.0.0/0", "::/0":
+		return true
+	}
+	return false
 }
 
 // upsertPeer replaces an existing peer with the same public key, otherwise
