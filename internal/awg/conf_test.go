@@ -137,8 +137,8 @@ func TestInnerLinkDisablesAutoRouting(t *testing.T) {
 	}
 }
 
-// TestParseConfPeersIgnoresInterface guards the buoy invariant: the
-// [Interface] section in awg0.conf is buoy-owned. coxswain-supplied obfuscation
+// TestParseConfPeersIgnoresInterface guards the node invariant: the
+// [Interface] section in awg0.conf is node-owned. coxswain-supplied obfuscation
 // values, even if smuggled into a pushed conf, must not be readable as peers.
 func TestParseConfPeersIgnoresInterface(t *testing.T) {
 	conf := []byte("[Interface]\nPrivateKey = LEAK=\nJc = 9\n\n[Peer]\nPublicKey = X=\nAllowedIPs = 10.0.0.2/32\n")

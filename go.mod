@@ -1,4 +1,4 @@
-module github.com/PharosVPN/buoy
+module github.com/PharosVPN/node
 
 go 1.25.6
 

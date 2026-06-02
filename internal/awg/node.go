@@ -13,16 +13,16 @@ import (
 	"os"
 	"path/filepath"
 
-	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
 )
 
 // stateFileMode is restrictive: the state file holds the node's AmneziaWG
 // private key.
 const stateFileMode = 0o600
 
-// Node is a buoy node's AmneziaWG server identity: its WireGuard keypair and
+// Node is a node node's AmneziaWG server identity: its WireGuard keypair and
 // its obfuscation parameter set. It is generated once and persisted, so the
-// values stay stable across buoy restarts and awg reloads — coxswain caches them.
+// values stay stable across node restarts and awg reloads — coxswain caches them.
 type Node struct {
 	priv        *ecdh.PrivateKey
 	obfuscation Obfuscation
@@ -130,8 +130,8 @@ func (n *Node) PrivateKey() string {
 func (n *Node) Obfuscation() Obfuscation { return n.obfuscation }
 
 // Info returns the node's AmneziaWG identity in wire form for GetStatus.
-func (n *Node) Info() *buoyv1.AmneziaWGInfo {
-	return &buoyv1.AmneziaWGInfo{
+func (n *Node) Info() *nodev1.AmneziaWGInfo {
+	return &nodev1.AmneziaWGInfo{
 		PublicKey:   n.PublicKey(),
 		Obfuscation: n.obfuscation.toProto(),
 	}
@@ -168,7 +168,7 @@ func (n *Node) InnerLinkSpec(listenPort, mtu uint16, exitObf Obfuscation) Interf
 }
 
 // RenderInterface renders the node's obfuscation parameters as the [Interface]
-// lines buoy writes to awg0.conf. The data-plane writer applies the conf so the
+// lines node writes to awg0.conf. The data-plane writer applies the conf so the
 // served config matches exactly what GetStatus reports.
 func (n *Node) RenderInterface() string {
 	return n.obfuscation.Render()

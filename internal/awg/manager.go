@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// DefaultConfPath is the AmneziaWG conf file buoy writes and `awg-quick` reads.
+// DefaultConfPath is the AmneziaWG conf file node writes and `awg-quick` reads.
 const DefaultConfPath = "/etc/amnezia/amneziawg/awg0.conf"
 
 const (
@@ -127,7 +127,7 @@ func NewManager(opts ManagerOptions) (*Manager, error) {
 }
 
 // Reconcile brings the data plane up from the on-disk conf at startup, so a
-// node that rebooted (or whose buoy process restarted) re-establishes its
+// node that rebooted (or whose node process restarted) re-establishes its
 // tunnels from persisted state without waiting for coxswain to push again —
 // the controller-outage-survival guarantee (DESIGN §3). If no conf has been
 // written yet (a fresh node), it is a no-op. It never changes the applied
@@ -178,7 +178,7 @@ func (m *Manager) Start(ctx context.Context) {
 // Subscribe registers a WatchEvents consumer with the observer. The returned
 // cancel must be called when the stream ends so the subscriber slot is
 // released.
-func (m *Manager) Subscribe() (<-chan *buoyv1.Event, func()) {
+func (m *Manager) Subscribe() (<-chan *nodev1.Event, func()) {
 	return m.observer.Subscribe()
 }
 
@@ -196,7 +196,7 @@ func (m *Manager) AppliedRevision() int64 {
 // node's persisted identity + the given peers, and reloads the interface
 // live. Stale revisions are rejected; an equal revision is treated as an
 // idempotent replay (no rewrite, reloaded=false). The caller has already
-// stripped any obfuscation values arriving in the request — buoy owns those.
+// stripped any obfuscation values arriving in the request — node owns those.
 func (m *Manager) PushConfig(ctx context.Context, revision int64, peers []ConfPeer) (appliedRev int64, reloaded bool, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -225,7 +225,7 @@ func (m *Manager) PushConfig(ctx context.Context, revision int64, peers []ConfPe
 // AddPeer inserts (or upserts) one peer into awg0.conf and adds it live. It
 // is idempotent: adding a peer with the same public key replaces its
 // allowed-ips and PSK with the new values.
-func (m *Manager) AddPeer(ctx context.Context, p *buoyv1.Peer) (bool, error) {
+func (m *Manager) AddPeer(ctx context.Context, p *nodev1.Peer) (bool, error) {
 	if p == nil || p.GetPublicKey() == "" {
 		return false, errors.New("awg: AddPeer requires a Peer with a public key")
 	}
@@ -302,7 +302,7 @@ func (m *Manager) RemovePeer(ctx context.Context, publicKey string) (bool, error
 // ListPeers correlates the configured peers (the conf is the source of
 // truth) with their live state on awg0. Peers configured but not yet
 // observed live appear with zero counters and an unset handshake.
-func (m *Manager) ListPeers(ctx context.Context) ([]*buoyv1.PeerState, error) {
+func (m *Manager) ListPeers(ctx context.Context) ([]*nodev1.PeerState, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -317,10 +317,10 @@ func (m *Manager) ListPeers(ctx context.Context) ([]*buoyv1.PeerState, error) {
 		byKey[p.PublicKey] = p
 	}
 
-	out := make([]*buoyv1.PeerState, 0, len(confPeers))
+	out := make([]*nodev1.PeerState, 0, len(confPeers))
 	for _, cp := range confPeers {
-		peer := &buoyv1.Peer{
-			Protocol:     buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+		peer := &nodev1.Peer{
+			Protocol:     nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 			PublicKey:    cp.PublicKey,
 			PresharedKey: cp.PresharedKey,
 			AllowedIps:   append([]string(nil), cp.AllowedIPs...),
@@ -328,7 +328,7 @@ func (m *Manager) ListPeers(ctx context.Context) ([]*buoyv1.PeerState, error) {
 		if cp.Endpoint != "" {
 			peer.Endpoints = []string{cp.Endpoint}
 		}
-		ps := &buoyv1.PeerState{Peer: peer}
+		ps := &nodev1.PeerState{Peer: peer}
 		if lp, ok := byKey[cp.PublicKey]; ok {
 			ps.RxBytes = lp.RxBytes
 			ps.TxBytes = lp.TxBytes
@@ -343,7 +343,7 @@ func (m *Manager) ListPeers(ctx context.Context) ([]*buoyv1.PeerState, error) {
 
 // MetricsSnapshot is the AmneziaWG data plane's current metrics snapshot.
 type MetricsSnapshot struct {
-	Peers   []*buoyv1.PeerState
+	Peers   []*nodev1.PeerState
 	TotalRx uint64
 	TotalTx uint64
 	// Handshakes and Errors are cumulative counters maintained by the

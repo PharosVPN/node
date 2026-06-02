@@ -1,4 +1,4 @@
-# buoy — Build Brief (subagent)
+# node — Build Brief (subagent)
 
 **Read first, in order:** `docs/BUILD.md` → `docs/DESIGN.md` (read decision 14
 carefully) → this file.
@@ -9,33 +9,33 @@ stop and raise it — do not invent one.
 
 ## What you are building
 
-`buoy` is the VPN node agent — a single static Go binary that runs on each
+`node` is the VPN node agent — a single static Go binary that runs on each
 public VPN node. It is the *server* side of the control channel; `coxswain` (the
-controller) is the *client* that dials in. `buoy` opens no connection to `coxswain`.
+controller) is the *client* that dials in. `node` opens no connection to `coxswain`.
 
 ## Behaviour
 
 ### Onboarding & lifecycle — SSH-driven (DESIGN §5, decision 14)
 
 There is **no enrollment-mode listener and no bootstrap token.** `coxswain` installs
-and updates the `buoy` agent over SSH, then runs it as the `buoy.service`
+and updates the `node` agent over SSH, then runs it as the `node.service`
 systemd unit. SSH is a *deployment* channel only — every operational
 instruction is gRPC.
 
-`buoy` exposes three CLI commands — this is the `coxswain`↔`buoy` contract, and
+`node` exposes three CLI commands — this is the `coxswain`↔`node` contract, and
 `coxswain`'s `internal/deploy` package already calls them:
 
-- **`buoy gen-csr`** — generate the node's mTLS keypair locally under
-  `/etc/buoy/` (the private key is written to `/etc/buoy/node.key` and **never
+- **`node gen-csr`** — generate the node's mTLS keypair locally under
+  `/etc/node/` (the private key is written to `/etc/node/node.key` and **never
   leaves the node**) and print a PEM-encoded CSR to stdout. `coxswain` captures the
-  CSR over SSH, signs it with the Fleet CA, and pushes back `/etc/buoy/node.crt`
-  (leaf + Fleet intermediate) and `/etc/buoy/ca.crt` (root trust anchor).
+  CSR over SSH, signs it with the Fleet CA, and pushes back `/etc/node/node.crt`
+  (leaf + Fleet intermediate) and `/etc/node/ca.crt` (root trust anchor).
   Re-running it is idempotent — an existing key is reused.
-- **`buoy run --config-dir /etc/buoy`** — the agent. Serve the `NodeControl`
+- **`node run --config-dir /etc/node`** — the agent. Serve the `NodeControl`
   gRPC service on TCP **port 8444** over mTLS, presenting `node.crt`/`node.key`
   and requiring client certificates that chain to `ca.crt`. Non-mTLS
   connections are dropped at the TLS handshake — no banner, no 401.
-- **`buoy version`** — print the agent version to stdout (`coxswain` records it
+- **`node version`** — print the agent version to stdout (`coxswain` records it
   after install/update).
 
 ### Normal mode
@@ -45,7 +45,7 @@ chains to `ca.crt`. Anything else is dropped at the TLS handshake.
 
 ### Control service (gRPC over mTLS) — `coxswain` calls these
 
-The contract is `docs/proto/pharos/buoy/v1/control.proto` — the `NodeControl`
+The contract is `docs/proto/pharos/node/v1/control.proto` — the `NodeControl`
 service, owned by `coxswain`. RPCs are **unified across data-plane protocols**: each
 request carries a `Protocol` enum field (`PROTOCOL_AMNEZIAWG`,
 `PROTOCOL_XRAY_REALITY`) rather than the service offering per-protocol RPCs.
@@ -83,7 +83,7 @@ Each node randomises **its own** obfuscation set — never fleet-wide:
 
 The set and the node's AmneziaWG keypair are generated once and persisted to
 `<config-dir>/awg-node.json` (`0600`), so the values stay **stable** across
-buoy restarts and `awg` reloads — `coxswain` caches them. The data-plane writer
+node restarts and `awg` reloads — `coxswain` caches them. The data-plane writer
 (milestone B2) renders them into the `[Interface]` section of `awg0.conf` and
 applies it; `GetStatus` reports the same persisted set.
 
@@ -95,9 +95,9 @@ config write → return a typed error; the running data plane keeps last-known-g
 
 ### AmneziaWG data plane (B2)
 
-`buoy` owns `awg0.conf` at `/etc/amnezia/amneziawg/awg0.conf` (0600) — the conf
+`node` owns `awg0.conf` at `/etc/amnezia/amneziawg/awg0.conf` (0600) — the conf
 is the source of truth coxswain pushes; every successful `AddPeer`/`RemovePeer`
-updates both `awg0` and the conf, so a buoy restart converges to the same
+updates both `awg0` and the conf, so a node restart converges to the same
 state. The `[Interface]` block (private key, listen port, MTU, obfuscation
 lines) is rendered from `awg-node.json`; the `[Peer]` blocks come from coxswain
 and never include `Endpoint` — clients dial the node.
@@ -125,12 +125,12 @@ persists at `<config-dir>/awg-revision`.
 
 ### Planned — node cascade / multi-hop (DESIGN decision 18, not scheduled)
 
-A future feature chains nodes: `client → entry buoy → inner AmneziaWG link →
-exit buoy → internet`. No work now, but **do not harden two assumptions** that
+A future feature chains nodes: `client → entry node → inner AmneziaWG link →
+exit node → internet`. No work now, but **do not harden two assumptions** that
 would otherwise be safe today:
 
 - **"A `[Peer]` block never carries an `Endpoint`."** True for client peers
-  (clients dial the node) — but the inner link is a `buoy`→`buoy` peer where the
+  (clients dial the node) — but the inner link is a `node`→`node` peer where the
   *entry* node **dials the exit**, so that peer *does* have an `Endpoint`. Keep
   the conf renderer able to emit a peer with an endpoint; don't bake "no peer
   ever has one" into the model.
@@ -144,7 +144,7 @@ would otherwise be safe today:
 
 ## Reuse
 
-`buoy`'s control channel is a **plain mTLS gRPC server** — `coxswain` dials it
+`node`'s control channel is a **plain mTLS gRPC server** — `coxswain` dials it
 directly (the node is public). It does **not** need the reverse-tunnel code;
 that belongs to `beacon`. You may adapt the **mTLS setup / CA-verification**
 helpers the operator wrote for an earlier private project — and if you do,
@@ -163,7 +163,7 @@ obey the rebrand rule in `docs/BUILD.md` §4 (strip every origin identifier).
 
 ## Non-negotiables
 
-- `buoy` never dials `coxswain`. It only accepts.
+- `node` never dials `coxswain`. It only accepts.
 - No config touches disk unless it arrived over a validated mTLS connection
   (the SSH-pushed `node.crt`/`ca.crt`/`node.key` are the onboarding exception).
 - No state beyond what `coxswain` pushed + AWG/XRay runtime state. No database.
@@ -171,6 +171,6 @@ obey the rebrand rule in `docs/BUILD.md` §4 (strip every origin identifier).
 
 ## Depends on
 
-The `buoy` control + event-stream protos, owned by `coxswain`, in `docs/proto/`.
+The `node` control + event-stream protos, owned by `coxswain`, in `docs/proto/`.
 A copy is vendored into this repo's `proto/`; generated Go is committed under
 `internal/gen/`. Build against them; do not fork them. See `proto/README.md`.

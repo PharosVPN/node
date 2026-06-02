@@ -5,13 +5,13 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             (unknown)
-// source: pharos/buoy/v1/control.proto
+// source: pharos/node/v1/control.proto
 
-// Package pharos.buoy.v1 is the buoy node control contract. coxswain is the gRPC
-// client; the buoy node is the server. coxswain dials out over mTLS — the node
+// Package pharos.node.v1 is the node node control contract. coxswain is the gRPC
+// client; the node node is the server. coxswain dials out over mTLS — the node
 // opens no connection to coxswain (DESIGN §2, §6, §7).
 
-package buoyv1
+package nodev1
 
 import (
 	context "context"
@@ -26,24 +26,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NodeControl_GetStatus_FullMethodName          = "/pharos.buoy.v1.NodeControl/GetStatus"
-	NodeControl_GetMetrics_FullMethodName         = "/pharos.buoy.v1.NodeControl/GetMetrics"
-	NodeControl_PushConfig_FullMethodName         = "/pharos.buoy.v1.NodeControl/PushConfig"
-	NodeControl_AddPeer_FullMethodName            = "/pharos.buoy.v1.NodeControl/AddPeer"
-	NodeControl_RemovePeer_FullMethodName         = "/pharos.buoy.v1.NodeControl/RemovePeer"
-	NodeControl_ListPeers_FullMethodName          = "/pharos.buoy.v1.NodeControl/ListPeers"
-	NodeControl_RestartService_FullMethodName     = "/pharos.buoy.v1.NodeControl/RestartService"
-	NodeControl_SetNetworkConfig_FullMethodName   = "/pharos.buoy.v1.NodeControl/SetNetworkConfig"
-	NodeControl_ConfigureInnerLink_FullMethodName = "/pharos.buoy.v1.NodeControl/ConfigureInnerLink"
-	NodeControl_RemoveInnerLink_FullMethodName    = "/pharos.buoy.v1.NodeControl/RemoveInnerLink"
-	NodeControl_WatchEvents_FullMethodName        = "/pharos.buoy.v1.NodeControl/WatchEvents"
+	NodeControl_GetStatus_FullMethodName          = "/pharos.node.v1.NodeControl/GetStatus"
+	NodeControl_GetMetrics_FullMethodName         = "/pharos.node.v1.NodeControl/GetMetrics"
+	NodeControl_PushConfig_FullMethodName         = "/pharos.node.v1.NodeControl/PushConfig"
+	NodeControl_AddPeer_FullMethodName            = "/pharos.node.v1.NodeControl/AddPeer"
+	NodeControl_RemovePeer_FullMethodName         = "/pharos.node.v1.NodeControl/RemovePeer"
+	NodeControl_ListPeers_FullMethodName          = "/pharos.node.v1.NodeControl/ListPeers"
+	NodeControl_RestartService_FullMethodName     = "/pharos.node.v1.NodeControl/RestartService"
+	NodeControl_SetNetworkConfig_FullMethodName   = "/pharos.node.v1.NodeControl/SetNetworkConfig"
+	NodeControl_ConfigureInnerLink_FullMethodName = "/pharos.node.v1.NodeControl/ConfigureInnerLink"
+	NodeControl_RemoveInnerLink_FullMethodName    = "/pharos.node.v1.NodeControl/RemoveInnerLink"
+	NodeControl_WatchEvents_FullMethodName        = "/pharos.node.v1.NodeControl/WatchEvents"
 )
 
 // NodeControlClient is the client API for NodeControl service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// NodeControl is the control-plane service every buoy node exposes to coxswain.
+// NodeControl is the control-plane service every node node exposes to coxswain.
 //
 // RPCs are unified across data-plane protocols: each request carries a
 // Protocol field rather than the service offering per-protocol RPCs. Adding a
@@ -213,7 +213,7 @@ type NodeControl_WatchEventsClient = grpc.ServerStreamingClient[Event]
 // All implementations must embed UnimplementedNodeControlServer
 // for forward compatibility.
 //
-// NodeControl is the control-plane service every buoy node exposes to coxswain.
+// NodeControl is the control-plane service every node node exposes to coxswain.
 //
 // RPCs are unified across data-plane protocols: each request carries a
 // Protocol field rather than the service offering per-protocol RPCs. Adding a
@@ -509,7 +509,7 @@ type NodeControl_WatchEventsServer = grpc.ServerStreamingServer[Event]
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var NodeControl_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "pharos.buoy.v1.NodeControl",
+	ServiceName: "pharos.node.v1.NodeControl",
 	HandlerType: (*NodeControlServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -560,5 +560,5 @@ var NodeControl_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "pharos/buoy/v1/control.proto",
+	Metadata: "pharos/node/v1/control.proto",
 }

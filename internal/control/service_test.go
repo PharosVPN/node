@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -17,7 +17,7 @@ import (
 
 // startTestServer spins up a NodeControl server backed by testOptions and
 // returns a ready-to-use client.
-func startTestServer(t *testing.T) buoyv1.NodeControlClient {
+func startTestServer(t *testing.T) nodev1.NodeControlClient {
 	t.Helper()
 	ca := newTestCA(t)
 	dir := t.TempDir()
@@ -34,24 +34,24 @@ func startTestServer(t *testing.T) buoyv1.NodeControlClient {
 	t.Cleanup(func() { cancel(); <-done })
 
 	conn := dial(t, addr, ca.clientCreds(t))
-	return buoyv1.NewNodeControlClient(conn)
+	return nodev1.NewNodeControlClient(conn)
 }
 
 // --- PushConfig -------------------------------------------------------------
 
 func TestPushConfigRoundTrip(t *testing.T) {
 	c := startTestServer(t)
-	cfg := &buoyv1.AmneziaWGConfig{Peers: []*buoyv1.Peer{
-		{Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG, PublicKey: "PUBA=", AllowedIps: []string{"10.0.0.2/32"}},
-		{Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG, PublicKey: "PUBB=", PresharedKey: "PSK=", AllowedIps: []string{"10.0.0.3/32"}},
+	cfg := &nodev1.AmneziaWGConfig{Peers: []*nodev1.Peer{
+		{Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG, PublicKey: "PUBA=", AllowedIps: []string{"10.0.0.2/32"}},
+		{Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG, PublicKey: "PUBB=", PresharedKey: "PSK=", AllowedIps: []string{"10.0.0.3/32"}},
 	}}
 	body, err := proto.Marshal(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	resp, err := c.PushConfig(context.Background(), &buoyv1.PushConfigRequest{
-		Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+	resp, err := c.PushConfig(context.Background(), &nodev1.PushConfigRequest{
+		Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 		Revision: 1,
 		Config:   body,
 	})
@@ -64,8 +64,8 @@ func TestPushConfigRoundTrip(t *testing.T) {
 
 	// ListPeers should now reflect both pushed peers — the conf is the
 	// source of truth even when live state is empty.
-	list, err := c.ListPeers(context.Background(), &buoyv1.ListPeersRequest{
-		Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+	list, err := c.ListPeers(context.Background(), &nodev1.ListPeersRequest{
+		Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 	})
 	if err != nil {
 		t.Fatalf("ListPeers: %v", err)
@@ -77,15 +77,15 @@ func TestPushConfigRoundTrip(t *testing.T) {
 
 func TestPushConfigStaleRevision(t *testing.T) {
 	c := startTestServer(t)
-	body, _ := proto.Marshal(&buoyv1.AmneziaWGConfig{})
+	body, _ := proto.Marshal(&nodev1.AmneziaWGConfig{})
 
-	if _, err := c.PushConfig(context.Background(), &buoyv1.PushConfigRequest{
-		Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG, Revision: 5, Config: body,
+	if _, err := c.PushConfig(context.Background(), &nodev1.PushConfigRequest{
+		Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG, Revision: 5, Config: body,
 	}); err != nil {
 		t.Fatalf("first PushConfig: %v", err)
 	}
-	_, err := c.PushConfig(context.Background(), &buoyv1.PushConfigRequest{
-		Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG, Revision: 3, Config: body,
+	_, err := c.PushConfig(context.Background(), &nodev1.PushConfigRequest{
+		Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG, Revision: 3, Config: body,
 	})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("stale revision: got %v, want FailedPrecondition", err)
@@ -94,8 +94,8 @@ func TestPushConfigStaleRevision(t *testing.T) {
 
 func TestPushConfigUnknownProtocol(t *testing.T) {
 	c := startTestServer(t)
-	_, err := c.PushConfig(context.Background(), &buoyv1.PushConfigRequest{
-		Protocol: buoyv1.Protocol_PROTOCOL_XRAY_REALITY,
+	_, err := c.PushConfig(context.Background(), &nodev1.PushConfigRequest{
+		Protocol: nodev1.Protocol_PROTOCOL_XRAY_REALITY,
 	})
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("XRay PushConfig: got %v, want Unimplemented", err)
@@ -104,8 +104,8 @@ func TestPushConfigUnknownProtocol(t *testing.T) {
 
 func TestPushConfigInvalidBytes(t *testing.T) {
 	c := startTestServer(t)
-	_, err := c.PushConfig(context.Background(), &buoyv1.PushConfigRequest{
-		Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+	_, err := c.PushConfig(context.Background(), &nodev1.PushConfigRequest{
+		Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 		Revision: 1,
 		Config:   []byte{0xff, 0xff, 0xff}, // garbage
 	})
@@ -118,10 +118,10 @@ func TestPushConfigInvalidBytes(t *testing.T) {
 
 func TestAddPeerRPC(t *testing.T) {
 	c := startTestServer(t)
-	resp, err := c.AddPeer(context.Background(), &buoyv1.AddPeerRequest{
-		Peer: &buoyv1.Peer{
+	resp, err := c.AddPeer(context.Background(), &nodev1.AddPeerRequest{
+		Peer: &nodev1.Peer{
 			Id:           "p1",
-			Protocol:     buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+			Protocol:     nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 			PublicKey:    "PUB=",
 			PresharedKey: "PSK=",
 			AllowedIps:   []string{"10.0.0.2/32"},
@@ -137,8 +137,8 @@ func TestAddPeerRPC(t *testing.T) {
 
 func TestAddPeerProtocolMismatchIsUnimplemented(t *testing.T) {
 	c := startTestServer(t)
-	_, err := c.AddPeer(context.Background(), &buoyv1.AddPeerRequest{
-		Peer: &buoyv1.Peer{Protocol: buoyv1.Protocol_PROTOCOL_XRAY_REALITY, PublicKey: "u"},
+	_, err := c.AddPeer(context.Background(), &nodev1.AddPeerRequest{
+		Peer: &nodev1.Peer{Protocol: nodev1.Protocol_PROTOCOL_XRAY_REALITY, PublicKey: "u"},
 	})
 	if status.Code(err) != codes.Unimplemented {
 		t.Errorf("XRay AddPeer: got %v, want Unimplemented", err)
@@ -147,7 +147,7 @@ func TestAddPeerProtocolMismatchIsUnimplemented(t *testing.T) {
 
 func TestAddPeerMissingPeerIsInvalidArgument(t *testing.T) {
 	c := startTestServer(t)
-	_, err := c.AddPeer(context.Background(), &buoyv1.AddPeerRequest{})
+	_, err := c.AddPeer(context.Background(), &nodev1.AddPeerRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("AddPeer without peer: got %v, want InvalidArgument", err)
 	}
@@ -155,8 +155,8 @@ func TestAddPeerMissingPeerIsInvalidArgument(t *testing.T) {
 
 func TestRemovePeerMissingPublicKey(t *testing.T) {
 	c := startTestServer(t)
-	_, err := c.RemovePeer(context.Background(), &buoyv1.RemovePeerRequest{
-		Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+	_, err := c.RemovePeer(context.Background(), &nodev1.RemovePeerRequest{
+		Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("RemovePeer without key: got %v, want InvalidArgument", err)
@@ -172,21 +172,21 @@ func TestGetMetricsRPC(t *testing.T) {
 	// stub Runtime reports no live state, so per-peer counters stay zero —
 	// the test asserts the response shape, not live byte totals (those are
 	// covered by Manager-level tests with a richer fake).
-	cfg := &buoyv1.AmneziaWGConfig{Peers: []*buoyv1.Peer{
-		{Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG, PublicKey: "A=", AllowedIps: []string{"10.0.0.2/32"}},
-		{Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG, PublicKey: "B=", AllowedIps: []string{"10.0.0.3/32"}},
+	cfg := &nodev1.AmneziaWGConfig{Peers: []*nodev1.Peer{
+		{Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG, PublicKey: "A=", AllowedIps: []string{"10.0.0.2/32"}},
+		{Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG, PublicKey: "B=", AllowedIps: []string{"10.0.0.3/32"}},
 	}}
 	body, err := proto.Marshal(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.PushConfig(context.Background(), &buoyv1.PushConfigRequest{
-		Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG, Revision: 1, Config: body,
+	if _, err := c.PushConfig(context.Background(), &nodev1.PushConfigRequest{
+		Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG, Revision: 1, Config: body,
 	}); err != nil {
 		t.Fatalf("PushConfig: %v", err)
 	}
 
-	resp, err := c.GetMetrics(context.Background(), &buoyv1.GetMetricsRequest{})
+	resp, err := c.GetMetrics(context.Background(), &nodev1.GetMetricsRequest{})
 	if err != nil {
 		t.Fatalf("GetMetrics: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestWatchEventsClosesOnClientCancel(t *testing.T) {
 	c := startTestServer(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, err := c.WatchEvents(ctx, &buoyv1.WatchEventsRequest{})
+	stream, err := c.WatchEvents(ctx, &nodev1.WatchEventsRequest{})
 	if err != nil {
 		t.Fatalf("WatchEvents: %v", err)
 	}
@@ -237,13 +237,13 @@ func TestWatchEventsClosesOnClientCancel(t *testing.T) {
 
 func TestGetStatusIncludesAmneziaWGService(t *testing.T) {
 	c := startTestServer(t)
-	resp, err := c.GetStatus(context.Background(), &buoyv1.GetStatusRequest{})
+	resp, err := c.GetStatus(context.Background(), &nodev1.GetStatusRequest{})
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
 	}
-	var awg *buoyv1.ServiceStatus
+	var awg *nodev1.ServiceStatus
 	for _, svc := range resp.GetServices() {
-		if svc.GetProtocol() == buoyv1.Protocol_PROTOCOL_AMNEZIAWG {
+		if svc.GetProtocol() == nodev1.Protocol_PROTOCOL_AMNEZIAWG {
 			awg = svc
 		}
 	}

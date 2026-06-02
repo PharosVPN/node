@@ -35,7 +35,7 @@ func TestParseShowDump(t *testing.T) {
 	if want := time.Unix(1747680000, 0).UTC(); !peers[0].LastHandshake.Equal(want) {
 		t.Errorf("peer A handshake = %v, want %v", peers[0].LastHandshake, want)
 	}
-	// A peer that has never handshaken reports 0 — buoy returns zero time.
+	// A peer that has never handshaken reports 0 — node returns zero time.
 	if !peers[1].LastHandshake.IsZero() {
 		t.Errorf("peer B handshake = %v, want zero (never)", peers[1].LastHandshake)
 	}

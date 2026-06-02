@@ -6,9 +6,9 @@
 //
 // The canonical rule set is owned by coxswain
 // (github.com/PharosVPN/coxswain/internal/netpolicy): coxswain previews it in the
-// admin UI, buoy applies the identical set. The two renderers MUST stay
+// admin UI, node applies the identical set. The two renderers MUST stay
 // byte-identical — both are pinned by tests against the same expected strings.
-// coxswain sends only the policy (three bools over NetworkConfig); buoy renders
+// coxswain sends only the policy (three bools over NetworkConfig); node renders
 // the rule templates here and substitutes the node-local interface names for
 // the %i (wg interface) and %e (autodetected egress) tokens before applying.
 package netpolicy
@@ -49,7 +49,7 @@ type TransitRoute struct {
 }
 
 // Policy is a node's traffic-handling policy. It mirrors coxswain's
-// netpolicy.Policy and the pharos.buoy.v1.NetworkConfig wire message.
+// netpolicy.Policy and the pharos.node.v1.NetworkConfig wire message.
 type Policy struct {
 	Forwarding bool
 	Masquerade bool
@@ -60,7 +60,7 @@ type Policy struct {
 }
 
 // Validate reports whether the policy is internally consistent. It matches
-// coxswain's validation so a policy coxswain accepts, buoy also accepts.
+// coxswain's validation so a policy coxswain accepts, node also accepts.
 func (p Policy) Validate() error {
 	if p.Masquerade && !p.Forwarding {
 		return ErrMasqueradeNeedsForwarding

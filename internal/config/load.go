@@ -18,12 +18,12 @@ import (
 )
 
 // envPrefix scopes environment-variable overrides. A double underscore marks a
-// nesting boundary, so BUOY_CONTROL__LISTEN_ADDR overrides control.listen_addr.
-const envPrefix = "BUOY_"
+// nesting boundary, so NODE_CONTROL__LISTEN_ADDR overrides control.listen_addr.
+const envPrefix = "NODE_"
 
-// Load builds buoy's configuration for the given config directory. It layers,
-// in order: universal defaults, an optional buoy.yaml inside dir, then
-// BUOY_-prefixed environment overrides. The config file is optional — a node
+// Load builds node's configuration for the given config directory. It layers,
+// in order: universal defaults, an optional node.yaml inside dir, then
+// NODE_-prefixed environment overrides. The config file is optional — a node
 // onboarded by coxswain has none, and that is the normal case.
 func Load(dir string) (Config, error) {
 	if dir == "" {

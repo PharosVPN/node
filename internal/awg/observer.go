@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -56,11 +56,11 @@ type peerState struct {
 }
 
 type subscriber struct {
-	ch      chan *buoyv1.Event
+	ch      chan *nodev1.Event
 	dropped atomic.Uint64
 }
 
-// NewObserver returns an Observer wired to rt. Call Run with the buoy
+// NewObserver returns an Observer wired to rt. Call Run with the node
 // lifetime context, or Poll once for unit-test determinism.
 func NewObserver(rt Runtime, interval, stale time.Duration, log *slog.Logger) *Observer {
 	if interval <= 0 {
@@ -94,8 +94,8 @@ func (o *Observer) ErrorsTotal() uint64 { return o.errors.Load() }
 // Subscribe registers a new event consumer. The returned cancel function
 // unregisters and closes the channel; the caller must always invoke it
 // (typically via defer) so a disconnected WatchEvents stream cannot leak.
-func (o *Observer) Subscribe() (<-chan *buoyv1.Event, func()) {
-	sub := &subscriber{ch: make(chan *buoyv1.Event, subscriberBuffer)}
+func (o *Observer) Subscribe() (<-chan *nodev1.Event, func()) {
+	sub := &subscriber{ch: make(chan *nodev1.Event, subscriberBuffer)}
 	o.mu.Lock()
 	o.subscribers[sub] = struct{}{}
 	o.mu.Unlock()
@@ -136,17 +136,17 @@ func (o *Observer) Run(ctx context.Context) {
 func (o *Observer) Poll(ctx context.Context) {
 	live, err := o.runtime.Show(ctx)
 	if err != nil {
-		// Interface-not-up isn't an error — buoy may be running before any
+		// Interface-not-up isn't an error — node may be running before any
 		// PushConfig. Only count and emit when we know we should be live.
 		listening, _ := o.runtime.Listening(ctx)
 		if !listening {
 			return
 		}
 		o.errors.Add(1)
-		o.broadcast(&buoyv1.Event{
+		o.broadcast(&nodev1.Event{
 			At:       timestamppb.New(o.now()),
-			Type:     buoyv1.EventType_EVENT_TYPE_ERROR,
-			Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+			Type:     nodev1.EventType_EVENT_TYPE_ERROR,
+			Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 			Message:  err.Error(),
 		})
 		return
@@ -180,10 +180,10 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 		ps := peerState{lastHandshake: lp.LastHandshake, upEmitted: old.upEmitted}
 
 		if !was {
-			o.emitLocked(&buoyv1.Event{
+			o.emitLocked(&nodev1.Event{
 				At:       timestamppb.New(now),
-				Type:     buoyv1.EventType_EVENT_TYPE_PEER_CONNECTED,
-				Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+				Type:     nodev1.EventType_EVENT_TYPE_PEER_CONNECTED,
+				Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 				PeerId:   pk,
 			})
 		}
@@ -193,19 +193,19 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 			// Fresh handshake — initial or rekey. Both count.
 			o.handshakes.Add(1)
 			ps.upEmitted = true
-			o.emitLocked(&buoyv1.Event{
+			o.emitLocked(&nodev1.Event{
 				At:       timestamppb.New(now),
-				Type:     buoyv1.EventType_EVENT_TYPE_HANDSHAKE_UP,
-				Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+				Type:     nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP,
+				Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 				PeerId:   pk,
 			})
 		case ps.upEmitted && !lp.LastHandshake.IsZero() && now.Sub(lp.LastHandshake) > o.stale:
 			// Previously up; handshake has aged out.
 			ps.upEmitted = false
-			o.emitLocked(&buoyv1.Event{
+			o.emitLocked(&nodev1.Event{
 				At:       timestamppb.New(now),
-				Type:     buoyv1.EventType_EVENT_TYPE_HANDSHAKE_DOWN,
-				Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+				Type:     nodev1.EventType_EVENT_TYPE_HANDSHAKE_DOWN,
+				Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 				PeerId:   pk,
 			})
 		}
@@ -215,10 +215,10 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 
 	for pk := range o.prev {
 		if _, still := cur[pk]; !still {
-			o.emitLocked(&buoyv1.Event{
+			o.emitLocked(&nodev1.Event{
 				At:       timestamppb.New(now),
-				Type:     buoyv1.EventType_EVENT_TYPE_PEER_DISCONNECTED,
-				Protocol: buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+				Type:     nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED,
+				Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 				PeerId:   pk,
 			})
 		}
@@ -229,7 +229,7 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 
 // broadcast emits one event to all subscribers. Useful for synchronous
 // emission outside detect (e.g., poll errors).
-func (o *Observer) broadcast(ev *buoyv1.Event) {
+func (o *Observer) broadcast(ev *nodev1.Event) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.emitLocked(ev)
@@ -239,7 +239,7 @@ func (o *Observer) broadcast(ev *buoyv1.Event) {
 // already at buffer capacity loses the event — better than blocking the
 // observer loop or back-pressuring other peers' streams. Drops are
 // counted per-subscriber and logged at the cancel point.
-func (o *Observer) emitLocked(ev *buoyv1.Event) {
+func (o *Observer) emitLocked(ev *nodev1.Event) {
 	for sub := range o.subscribers {
 		select {
 		case sub.ch <- ev:

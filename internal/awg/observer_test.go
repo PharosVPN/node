@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
 )
 
 // newTestObserver builds an Observer wired to a fakeRuntime with deterministic
@@ -28,9 +28,9 @@ func newTestObserver(t *testing.T) (*Observer, *fakeRuntime, *time.Time) {
 // drain reads up to n events from ch with a small timeout per event,
 // returning what it got. Unblocks tests when the observer emits fewer
 // events than expected.
-func drain(t *testing.T, ch <-chan *buoyv1.Event, n int) []*buoyv1.Event {
+func drain(t *testing.T, ch <-chan *nodev1.Event, n int) []*nodev1.Event {
 	t.Helper()
-	out := make([]*buoyv1.Event, 0, n)
+	out := make([]*nodev1.Event, 0, n)
 	for i := 0; i < n; i++ {
 		select {
 		case ev := <-ch:
@@ -71,7 +71,7 @@ func TestObserverEmitsPeerConnected(t *testing.T) {
 	o.Poll(context.Background())
 
 	evs := drain(t, ch, 1)
-	if len(evs) != 1 || evs[0].GetType() != buoyv1.EventType_EVENT_TYPE_PEER_CONNECTED {
+	if len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_PEER_CONNECTED {
 		t.Fatalf("events = %v, want one PEER_CONNECTED", evs)
 	}
 	if evs[0].GetPeerId() != "NEW=" {
@@ -94,7 +94,7 @@ func TestObserverEmitsPeerDisconnected(t *testing.T) {
 	o.Poll(context.Background())
 
 	evs := drain(t, ch, 1)
-	if len(evs) != 1 || evs[0].GetType() != buoyv1.EventType_EVENT_TYPE_PEER_DISCONNECTED {
+	if len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED {
 		t.Fatalf("events = %v, want one PEER_DISCONNECTED", evs)
 	}
 }
@@ -116,7 +116,7 @@ func TestObserverEmitsHandshakeUpAndCounts(t *testing.T) {
 		t.Errorf("HandshakesTotal = %d, want 1", got)
 	}
 	evs := drain(t, ch, 1)
-	if len(evs) != 1 || evs[0].GetType() != buoyv1.EventType_EVENT_TYPE_HANDSHAKE_UP {
+	if len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP {
 		t.Fatalf("events = %v, want HANDSHAKE_UP", evs)
 	}
 
@@ -127,7 +127,7 @@ func TestObserverEmitsHandshakeUpAndCounts(t *testing.T) {
 	if got := o.HandshakesTotal(); got != 2 {
 		t.Errorf("HandshakesTotal after rekey = %d, want 2", got)
 	}
-	if evs := drain(t, ch, 1); len(evs) != 1 || evs[0].GetType() != buoyv1.EventType_EVENT_TYPE_HANDSHAKE_UP {
+	if evs := drain(t, ch, 1); len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP {
 		t.Errorf("rekey events = %v, want HANDSHAKE_UP", evs)
 	}
 }
@@ -144,7 +144,7 @@ func TestObserverEmitsHandshakeDownOnceWhenStale(t *testing.T) {
 	*clock = hs.Add(5 * time.Second)
 	rt.setLivePeer(LivePeer{PublicKey: "P=", LastHandshake: *clock})
 	o.Poll(context.Background())
-	if evs := drain(t, ch, 1); len(evs) != 1 || evs[0].GetType() != buoyv1.EventType_EVENT_TYPE_HANDSHAKE_UP {
+	if evs := drain(t, ch, 1); len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP {
 		t.Fatalf("priming UP events = %v", evs)
 	}
 
@@ -152,7 +152,7 @@ func TestObserverEmitsHandshakeDownOnceWhenStale(t *testing.T) {
 	*clock = (*clock).Add(60 * time.Second)
 	o.Poll(context.Background())
 	evs := drain(t, ch, 1)
-	if len(evs) != 1 || evs[0].GetType() != buoyv1.EventType_EVENT_TYPE_HANDSHAKE_DOWN {
+	if len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_HANDSHAKE_DOWN {
 		t.Fatalf("stale events = %v, want HANDSHAKE_DOWN", evs)
 	}
 
@@ -180,12 +180,12 @@ func TestObserverErrorPath(t *testing.T) {
 		t.Errorf("ErrorsTotal = %d, want 1", got)
 	}
 	evs := drain(t, ch, 1)
-	if len(evs) != 1 || evs[0].GetType() != buoyv1.EventType_EVENT_TYPE_ERROR {
+	if len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_ERROR {
 		t.Fatalf("events = %v, want ERROR", evs)
 	}
 }
 
-// TestObserverIgnoresShowErrorWhenInterfaceDown proves buoy doesn't count
+// TestObserverIgnoresShowErrorWhenInterfaceDown proves node doesn't count
 // "interface not up yet" against errors_total — that's the normal pre-push
 // state, not a fault.
 func TestObserverIgnoresShowErrorWhenInterfaceDown(t *testing.T) {

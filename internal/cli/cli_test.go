@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// run executes the buoy CLI with args, returning stdout and stderr separately —
+// run executes the node CLI with args, returning stdout and stderr separately —
 // coxswain captures gen-csr's stdout over SSH, so the split matters.
 func run(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	t.Helper()

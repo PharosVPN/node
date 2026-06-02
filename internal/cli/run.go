@@ -10,22 +10,22 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/PharosVPN/buoy/internal/awg"
-	"github.com/PharosVPN/buoy/internal/config"
-	"github.com/PharosVPN/buoy/internal/control"
-	"github.com/PharosVPN/buoy/internal/netpolicy"
+	"github.com/PharosVPN/node/internal/awg"
+	"github.com/PharosVPN/node/internal/config"
+	"github.com/PharosVPN/node/internal/control"
+	"github.com/PharosVPN/node/internal/netpolicy"
 	"github.com/spf13/cobra"
 )
 
-// newRunCmd runs the buoy agent: it serves the mTLS NodeControl gRPC service
-// coxswain drives. coxswain installs this as the buoy.service systemd unit, invoked as
-// `buoy run --config-dir /etc/buoy`.
+// newRunCmd runs the node agent: it serves the mTLS NodeControl gRPC service
+// coxswain drives. coxswain installs this as the node.service systemd unit, invoked as
+// `node run --config-dir /etc/node`.
 func newRunCmd() *cobra.Command {
 	var configDir string
 
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "Run the buoy agent (serve the mTLS NodeControl service)",
+		Short: "Run the node agent (serve the mTLS NodeControl service)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load(configDir)
@@ -34,7 +34,7 @@ func newRunCmd() *cobra.Command {
 			}
 
 			log := newLogger(cfg.Log.Level)
-			log.Info("starting buoy agent",
+			log.Info("starting node agent",
 				"version", version,
 				"config_dir", cfg.Dir,
 				"listen_addr", cfg.Control.ListenAddr)
@@ -134,7 +134,7 @@ func newRunCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&configDir, "config-dir", DefaultConfigDir,
-		"directory holding node.key, node.crt, ca.crt and optional buoy.yaml")
+		"directory holding node.key, node.crt, ca.crt and optional node.yaml")
 	return cmd
 }
 

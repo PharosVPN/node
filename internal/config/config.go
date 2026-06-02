@@ -1,34 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 The PharosVPN Authors
 
-// Package config defines buoy's configuration model and its loader.
+// Package config defines node's configuration model and its loader.
 //
-// buoy holds no database. Its configuration is the config directory coxswain
+// node holds no database. Its configuration is the config directory coxswain
 // populated over SSH during onboarding (DESIGN §5) — the node keypair and the
 // trust anchors — plus a small set of tunables with safe defaults. An optional
-// buoy.yaml inside the config directory and BUOY_-prefixed environment
+// node.yaml inside the config directory and NODE_-prefixed environment
 // variables may override those tunables; neither is required.
 package config
 
 import "path/filepath"
 
 // On-node filenames within the config directory. coxswain's deploy package writes
-// node.crt and ca.crt to these exact paths over SSH, and `buoy gen-csr` writes
-// node.key — this is the coxswain↔buoy on-disk contract (see deploy.go).
+// node.crt and ca.crt to these exact paths over SSH, and `node gen-csr` writes
+// node.key — this is the coxswain↔node on-disk contract (see deploy.go).
 const (
 	// NodeKeyFile holds the node's mTLS private key. It is generated on the
-	// node by `buoy gen-csr` and never leaves it.
+	// node by `node gen-csr` and never leaves it.
 	NodeKeyFile = "node.key"
 	// NodeCertFile holds the node's signed leaf certificate followed by the
-	// Fleet intermediate, so buoy can present a full chain.
+	// Fleet intermediate, so node can present a full chain.
 	NodeCertFile = "node.crt"
 	// CACertFile holds the root CA certificate — the trust anchor controller
 	// client certificates must chain to.
 	CACertFile = "ca.crt"
 	// ConfigFile is the optional tunables file read from the config directory.
-	ConfigFile = "buoy.yaml"
+	ConfigFile = "node.yaml"
 	// AWGStateFile holds the node's AmneziaWG server identity — its keypair
-	// and obfuscation set. buoy generates it once and reuses it (DESIGN §3).
+	// and obfuscation set. node generates it once and reuses it (DESIGN §3).
 	AWGStateFile = "awg-node.json"
 	// AWGRevisionFile persists the last applied PushConfig revision so the
 	// optimistic-concurrency guard survives a restart.
@@ -44,7 +44,7 @@ const (
 // dials port 8444 on every node (DESIGN §2; coxswain deploy.ControlPort).
 const DefaultListenAddr = ":8444"
 
-// Config is buoy's full runtime configuration.
+// Config is node's full runtime configuration.
 type Config struct {
 	// Dir is the config directory passed via --config-dir. It is not read
 	// from the config file itself.
@@ -87,7 +87,7 @@ func (c Config) AWGRevisionPath() string { return filepath.Join(c.Dir, AWGRevisi
 // NetPolicyPath is the absolute path to the persisted network-policy state.
 func (c Config) NetPolicyPath() string { return filepath.Join(c.Dir, NetPolicyFile) }
 
-// defaults returns the universal configuration, so a node with no buoy.yaml
+// defaults returns the universal configuration, so a node with no node.yaml
 // still has a complete, valid Config.
 func defaults() Config {
 	return Config{

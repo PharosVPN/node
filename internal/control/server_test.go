@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PharosVPN/buoy/internal/awg"
-	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
-	"github.com/PharosVPN/buoy/internal/netpolicy"
+	"github.com/PharosVPN/node/internal/awg"
+	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
+	"github.com/PharosVPN/node/internal/netpolicy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -66,7 +66,7 @@ func TestServeAcceptsMutualTLS(t *testing.T) {
 	})
 
 	conn := dial(t, addr, ca.clientCreds(t))
-	resp, err := buoyv1.NewNodeControlClient(conn).GetStatus(context.Background(), &buoyv1.GetStatusRequest{})
+	resp, err := nodev1.NewNodeControlClient(conn).GetStatus(context.Background(), &nodev1.GetStatusRequest{})
 	if err != nil {
 		t.Fatalf("GetStatus over mTLS: %v", err)
 	}
@@ -86,8 +86,8 @@ func TestServeAcceptsMutualTLS(t *testing.T) {
 
 	// SetNetworkConfig (decision 16) is implemented: an empty policy (forward
 	// off) applies cleanly with no rules.
-	npResp, err := buoyv1.NewNodeControlClient(conn).SetNetworkConfig(context.Background(),
-		&buoyv1.SetNetworkConfigRequest{Config: &buoyv1.NetworkConfig{}})
+	npResp, err := nodev1.NewNodeControlClient(conn).SetNetworkConfig(context.Background(),
+		&nodev1.SetNetworkConfigRequest{Config: &nodev1.NetworkConfig{}})
 	if err != nil {
 		t.Errorf("SetNetworkConfig: %v", err)
 	} else if !npResp.GetApplied() {
@@ -118,22 +118,22 @@ func TestServeInnerLink(t *testing.T) {
 		}
 	})
 
-	client := buoyv1.NewNodeControlClient(dial(t, addr, ca.clientCreds(t)))
+	client := nodev1.NewNodeControlClient(dial(t, addr, ca.clientCreds(t)))
 
 	// A valid exit obfuscation set: distinct H >= 5, Jmin <= Jmax, S2 != S1+56.
-	exitObf := &buoyv1.AmneziaWGObfuscation{
+	exitObf := &nodev1.AmneziaWGObfuscation{
 		Jc: 5, Jmin: 25, Jmax: 800, S1: 20, S2: 30, S3: 40, S4: 50,
 		H1: 10, H2: 11, H3: 12, H4: 13,
 	}
-	resp, err := client.ConfigureInnerLink(context.Background(), &buoyv1.ConfigureInnerLinkRequest{
+	resp, err := client.ConfigureInnerLink(context.Background(), &nodev1.ConfigureInnerLinkRequest{
 		Revision: 1,
-		Config: &buoyv1.InnerLinkConfig{
+		Config: &nodev1.InnerLinkConfig{
 			Interface:       "awg1",
 			ListenPort:      51820,
 			Mtu:             1380,
 			PeerObfuscation: exitObf,
-			Exit: &buoyv1.Peer{
-				Protocol:   buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+			Exit: &nodev1.Peer{
+				Protocol:   nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 				PublicKey:  "EXITPUB=",
 				AllowedIps: []string{"0.0.0.0/0"},
 				Endpoints:  []string{"198.51.100.9:443"},
@@ -159,13 +159,13 @@ func TestServeInnerLink(t *testing.T) {
 	}
 
 	// An exit with no endpoint is rejected — the entry must know where to dial.
-	_, err = client.ConfigureInnerLink(context.Background(), &buoyv1.ConfigureInnerLinkRequest{
+	_, err = client.ConfigureInnerLink(context.Background(), &nodev1.ConfigureInnerLinkRequest{
 		Revision: 1,
-		Config: &buoyv1.InnerLinkConfig{
+		Config: &nodev1.InnerLinkConfig{
 			Interface:       "awg2",
 			ListenPort:      51821,
 			PeerObfuscation: exitObf,
-			Exit:            &buoyv1.Peer{PublicKey: "X=", AllowedIps: []string{"0.0.0.0/0"}},
+			Exit:            &nodev1.Peer{PublicKey: "X=", AllowedIps: []string{"0.0.0.0/0"}},
 		},
 	})
 	if status.Code(err) != codes.InvalidArgument {
@@ -173,7 +173,7 @@ func TestServeInnerLink(t *testing.T) {
 	}
 
 	// Teardown removes the interface and its conf.
-	rm, err := client.RemoveInnerLink(context.Background(), &buoyv1.RemoveInnerLinkRequest{Interface: "awg1"})
+	rm, err := client.RemoveInnerLink(context.Background(), &nodev1.RemoveInnerLinkRequest{Interface: "awg1"})
 	if err != nil {
 		t.Fatalf("RemoveInnerLink: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestServeRejectsNonMTLS(t *testing.T) {
 	conn := dial(t, addr, noCertCreds)
 	rpcCtx, rpcCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer rpcCancel()
-	_, err = buoyv1.NewNodeControlClient(conn).GetStatus(rpcCtx, &buoyv1.GetStatusRequest{})
+	_, err = nodev1.NewNodeControlClient(conn).GetStatus(rpcCtx, &nodev1.GetStatusRequest{})
 	if err == nil {
 		t.Fatal("GetStatus without a client certificate succeeded, want handshake failure")
 	}
@@ -404,7 +404,7 @@ func (ca *testCA) leaf(t *testing.T, cn string, eku x509.ExtKeyUsage, ips []net.
 // onboarding would.
 func (ca *testCA) writeNodeFiles(t *testing.T, dir string) {
 	t.Helper()
-	certPEM, keyPEM := ca.leaf(t, "pharos-buoy-node", x509.ExtKeyUsageServerAuth,
+	certPEM, keyPEM := ca.leaf(t, "pharos-node-node", x509.ExtKeyUsageServerAuth,
 		[]net.IP{net.IPv4(127, 0, 0, 1)})
 	write := func(name string, data []byte) {
 		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {

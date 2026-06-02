@@ -13,7 +13,7 @@ import (
 
 // TestRulesCanonical pins the exact canonical rule set. These strings are the
 // cross-repo contract with coxswain/internal/netpolicy — if this test changes,
-// coxswain's matching test must change identically, or buoy and coxswain will
+// coxswain's matching test must change identically, or node and coxswain will
 // disagree on what a policy means.
 func TestRulesCanonical(t *testing.T) {
 	tests := []struct {

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
 )
 
 // fakeRuntime is a Runtime that maintains synthetic live state. Up/SyncConf
@@ -190,10 +190,10 @@ func newTestManager(t *testing.T) (*Manager, *fakeRuntime) {
 	return mgr, rt
 }
 
-func peer(id, pubkey, psk string, ips ...string) *buoyv1.Peer {
-	return &buoyv1.Peer{
+func peer(id, pubkey, psk string, ips ...string) *nodev1.Peer {
+	return &nodev1.Peer{
 		Id:           id,
-		Protocol:     buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+		Protocol:     nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 		PublicKey:    pubkey,
 		PresharedKey: psk,
 		AllowedIps:   ips,
@@ -230,9 +230,9 @@ func TestAddPeerWritesConfAndCallsRuntime(t *testing.T) {
 // conf — the cascade primitive end to end through the manager.
 func TestAddPeerCarriesInnerLinkEndpoint(t *testing.T) {
 	mgr, rt := newTestManager(t)
-	p := &buoyv1.Peer{
+	p := &nodev1.Peer{
 		Id:         "exit-link",
-		Protocol:   buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+		Protocol:   nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 		PublicKey:  "EXIT=",
 		AllowedIps: []string{"0.0.0.0/0"},
 		Endpoints:  []string{"203.0.113.7:443"},
@@ -374,7 +374,7 @@ func TestListPeersJoinsLiveState(t *testing.T) {
 	if len(peers) != 2 {
 		t.Fatalf("peers = %d, want 2", len(peers))
 	}
-	byKey := map[string]*buoyv1.PeerState{}
+	byKey := map[string]*nodev1.PeerState{}
 	for _, p := range peers {
 		byKey[p.GetPeer().GetPublicKey()] = p
 	}

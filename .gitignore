@@ -1,5 +1,5 @@
 # Build output
-/buoy
+/node
 /dist/
 
 # Node mTLS material — never committed (DESIGN §4, §5)

@@ -1,4 +1,4 @@
-# CI for buoy — build, vet, test, lint (DESIGN §14, docs/BUILD.md §7).
+# CI for node — build, vet, test, lint (DESIGN §14, docs/BUILD.md §7).
 name: ci
 
 on:

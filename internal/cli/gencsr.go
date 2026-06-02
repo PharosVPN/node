@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/PharosVPN/buoy/internal/config"
-	"github.com/PharosVPN/buoy/internal/pki"
+	"github.com/PharosVPN/node/internal/config"
+	"github.com/PharosVPN/node/internal/pki"
 	"github.com/spf13/cobra"
 )
 
@@ -16,7 +16,7 @@ import (
 // PEM-encoded certificate signing request to stdout.
 //
 // This is the first step of SSH onboarding (DESIGN §5, decision 14): coxswain runs
-// `buoy gen-csr` over SSH, captures the CSR from stdout, signs it with the
+// `node gen-csr` over SSH, captures the CSR from stdout, signs it with the
 // Fleet CA, and pushes node.crt and ca.crt back. The node's private key is
 // written to node.key and never leaves the node.
 //
@@ -39,9 +39,9 @@ func newGenCSRCmd() *cobra.Command {
 			// can capture it cleanly over SSH. A failed diagnostic write must
 			// not fail gen-csr itself.
 			if res.KeyGenerated {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "buoy: generated node key at %s\n", keyPath)
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "node: generated node key at %s\n", keyPath)
 			} else {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "buoy: reusing existing node key at %s\n", keyPath)
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "node: reusing existing node key at %s\n", keyPath)
 			}
 			_, err = cmd.OutOrStdout().Write(res.CSRPEM)
 			return err

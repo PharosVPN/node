@@ -46,7 +46,7 @@ func TestLoadFileOverride(t *testing.T) {
 
 func TestLoadEnvOverride(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("BUOY_CONTROL__LISTEN_ADDR", ":7777")
+	t.Setenv("NODE_CONTROL__LISTEN_ADDR", ":7777")
 	c, err := Load(dir)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -74,14 +74,14 @@ func TestLoadRejectsBadLogLevel(t *testing.T) {
 }
 
 func TestPathHelpers(t *testing.T) {
-	c := Config{Dir: "/etc/buoy"}
-	if got := c.NodeKeyPath(); got != "/etc/buoy/node.key" {
+	c := Config{Dir: "/etc/node"}
+	if got := c.NodeKeyPath(); got != "/etc/node/node.key" {
 		t.Errorf("NodeKeyPath = %q", got)
 	}
-	if got := c.NodeCertPath(); got != "/etc/buoy/node.crt" {
+	if got := c.NodeCertPath(); got != "/etc/node/node.crt" {
 		t.Errorf("NodeCertPath = %q", got)
 	}
-	if got := c.CACertPath(); got != "/etc/buoy/ca.crt" {
+	if got := c.CACertPath(); got != "/etc/node/ca.crt" {
 		t.Errorf("CACertPath = %q", got)
 	}
 }

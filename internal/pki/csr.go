@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 The PharosVPN Authors
 
-// Package pki handles buoy's node-side certificate material: it generates the
+// Package pki handles node's node-side certificate material: it generates the
 // node's mTLS keypair on the node and emits a certificate signing request.
 //
 // The node's private key is generated here and never leaves the node. coxswain
@@ -26,11 +26,11 @@ import (
 // owner. It never leaves the node.
 const keyFileMode = 0o600
 
-// CSR subject identifies the request as a buoy node certificate. coxswain pins the
+// CSR subject identifies the request as a node node certificate. coxswain pins the
 // node's reachable address as a SAN when it signs (see pki.SignNodeCSR in
 // coxswain); the CSR itself carries only this subject.
 var csrSubject = pkix.Name{
-	CommonName:   "pharos-buoy-node",
+	CommonName:   "pharos-node-node",
 	Organization: []string{"PharosVPN"},
 }
 
@@ -46,7 +46,7 @@ type CSRResult struct {
 // GenerateCSR ensures a node private key exists at keyPath and returns a
 // certificate signing request built from it.
 //
-// If keyPath already holds a key it is reused, making `buoy gen-csr`
+// If keyPath already holds a key it is reused, making `node gen-csr`
 // idempotent: re-running it after a failed onboarding emits a fresh CSR for the
 // same key rather than orphaning the old one. The parent directory is created
 // if missing.

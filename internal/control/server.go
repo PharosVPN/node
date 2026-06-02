@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 The PharosVPN Authors
 
-// Package control is buoy's mTLS gRPC server: the NodeControl service coxswain
-// drives. buoy is the server and coxswain is the client — coxswain dials in over
-// outbound mTLS and buoy opens no connection to coxswain (DESIGN §2, §6).
+// Package control is node's mTLS gRPC server: the NodeControl service coxswain
+// drives. node is the server and coxswain is the client — coxswain dials in over
+// outbound mTLS and node opens no connection to coxswain (DESIGN §2, §6).
 //
 // The listener accepts only mTLS connections whose client certificate chains
 // to the root CA. Anything else is rejected at the TLS handshake — no banner,
@@ -20,14 +20,14 @@ import (
 	"net"
 	"os"
 
-	"github.com/PharosVPN/buoy/internal/awg"
-	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
-	"github.com/PharosVPN/buoy/internal/netpolicy"
+	"github.com/PharosVPN/node/internal/awg"
+	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
+	"github.com/PharosVPN/node/internal/netpolicy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
-// Server is buoy's NodeControl gRPC server.
+// Server is node's NodeControl gRPC server.
 type Server struct {
 	addr string
 	grpc *grpc.Server
@@ -68,7 +68,7 @@ func NewServer(opts Options) (*Server, error) {
 	}
 
 	gs := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
-	buoyv1.RegisterNodeControlServer(gs, newService(opts.Version, opts.AWGNode, opts.AWGRegistry, opts.NetPolicy))
+	nodev1.RegisterNodeControlServer(gs, newService(opts.Version, opts.AWGNode, opts.AWGRegistry, opts.NetPolicy))
 
 	return &Server{addr: opts.ListenAddr, grpc: gs, log: opts.Log}, nil
 }
@@ -98,7 +98,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 }
 
-// serverTLS builds the mTLS configuration: buoy presents its node chain and
+// serverTLS builds the mTLS configuration: node presents its node chain and
 // requires a client certificate that verifies against the root CA.
 func serverTLS(nodeCertPath, nodeKeyPath, caCertPath string) (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(nodeCertPath, nodeKeyPath)

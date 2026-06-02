@@ -3,14 +3,14 @@
 
 syntax = "proto3";
 
-// Package pharos.buoy.v1 is the buoy node control contract. coxswain is the gRPC
-// client; the buoy node is the server. coxswain dials out over mTLS — the node
+// Package pharos.node.v1 is the node node control contract. coxswain is the gRPC
+// client; the node node is the server. coxswain dials out over mTLS — the node
 // opens no connection to coxswain (DESIGN §2, §6, §7).
-package pharos.buoy.v1;
+package pharos.node.v1;
 
 import "google/protobuf/timestamp.proto";
 
-// NodeControl is the control-plane service every buoy node exposes to coxswain.
+// NodeControl is the control-plane service every node node exposes to coxswain.
 //
 // RPCs are unified across data-plane protocols: each request carries a
 // Protocol field rather than the service offering per-protocol RPCs. Adding a
@@ -97,7 +97,7 @@ message GetStatusResponse {
   string agent_version = 1;
   int64 uptime_seconds = 2;
   repeated ServiceStatus services = 3;
-  // amneziawg is the node's AmneziaWG server identity, populated once buoy
+  // amneziawg is the node's AmneziaWG server identity, populated once node
   // has configured awg0. caravel needs these exact values to build a tunnel
   // that handshakes (DESIGN §3). Absent until the data plane is up.
   AmneziaWGInfo amneziawg = 4;
@@ -113,7 +113,7 @@ message ServiceStatus {
   string detail = 5;
 }
 
-// AmneziaWGInfo is a node's AmneziaWG server identity, as buoy configured it.
+// AmneziaWGInfo is a node's AmneziaWG server identity, as node configured it.
 message AmneziaWGInfo {
   // public_key is the node's AmneziaWG server public key.
   string public_key = 1;
@@ -126,7 +126,7 @@ message AmneziaWGInfo {
 // the exact values to build a tunnel that handshakes (DESIGN §3). The field
 // names match the AmneziaWG config keys verbatim.
 //
-// buoy generates and enforces these structural rules; any client that
+// node generates and enforces these structural rules; any client that
 // generates or validates a set must apply the same guards:
 //   - jmin <= jmax
 //   - h1-h4 are four distinct values, each >= 5 (1-4 are reserved for
@@ -167,7 +167,7 @@ message PushConfigRequest {
   // revision is coxswain's monotonically increasing config revision.
   int64 revision = 2;
   // config is the protocol-specific config document. The encoding is fixed
-  // per protocol so buoy can decode it without out-of-band knowledge:
+  // per protocol so node can decode it without out-of-band knowledge:
   //
   //   - PROTOCOL_AMNEZIAWG: proto.Marshal of AmneziaWGConfig.
   //   - PROTOCOL_XRAY_REALITY: TBD (B3).
@@ -183,7 +183,7 @@ message PushConfigResponse {
 
 // AmneziaWGConfig is the PushConfigRequest.config payload for
 // PROTOCOL_AMNEZIAWG: the full peer set coxswain wants the node to apply. The
-// node-level obfuscation parameters are intentionally absent — buoy owns
+// node-level obfuscation parameters are intentionally absent — node owns
 // them (AmneziaWGObfuscation, decision-14 follow-up); coxswain sends peers,
 // nothing else.
 message AmneziaWGConfig {
@@ -209,7 +209,7 @@ message NetworkConfig {
 // TransitRoute policy-routes one cascaded device's tunnel traffic into an inner
 // AmneziaWG interface toward its chosen exit, instead of masquerading it
 // locally (DESIGN §3, the entry-node `transit` rule). coxswain computes the
-// mark and table; buoy installs the mangle MARK + ip rule + ip route.
+// mark and table; node installs the mangle MARK + ip rule + ip route.
 message TransitRoute {
   // device_cidr is the client's tunnel address, e.g. "10.8.0.5/32".
   string device_cidr = 1;
@@ -230,7 +230,7 @@ message SetNetworkConfigResponse {
 }
 
 // InnerLinkConfig describes one node→node inner AmneziaWG link on the entry
-// node (DESIGN §3, node cascade). buoy supplies this node's private key from
+// node (DESIGN §3, node cascade). node supplies this node's private key from
 // its own identity; coxswain supplies everything that must match the exit.
 message InnerLinkConfig {
   // interface is the inner wg interface name, e.g. "awg1". It is distinct from

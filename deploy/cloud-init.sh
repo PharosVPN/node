@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 The PharosVPN Authors
 #
-# PharosVPN buoy node base prep (milestone B6), run as cloud-init user-data on a
+# PharosVPN node node base prep (milestone B6), run as cloud-init user-data on a
 # fresh Ubuntu 24.04 droplet. It installs the AmneziaWG data plane (kernel
 # module + awg / awg-quick tools) and enables IP forwarding, so that `cox nodes
-# add` can then install and enroll the buoy agent over SSH. coxswain still pushes
+# add` can then install and enroll the node agent over SSH. coxswain still pushes
 # the per-node network policy (decision 16); this only lays the data-plane base.
 set -uxo pipefail
 export DEBIAN_FRONTEND=noninteractive

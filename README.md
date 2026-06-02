@@ -1,10 +1,10 @@
-# buoy
+# node
 
 > A fixed, public marker anchored out in the water — ships rely on it.
 
-**`buoy` is the PharosVPN node agent.** It runs on every public VPN node, runs
+**`node` is the PharosVPN node agent.** It runs on every public VPN node, runs
 the data plane (AmneziaWG + XRay), and applies only the configuration the
-controller pushes to it over mTLS. It is deliberately dumb: a compromised `buoy`
+controller pushes to it over mTLS. It is deliberately dumb: a compromised `node`
 cannot compromise the fleet.
 
 Part of the [PharosVPN](https://github.com/PharosVPN) platform — see

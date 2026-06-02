@@ -44,7 +44,7 @@ func (s InterfaceSpec) mtuOrDefault() uint16 {
 	return s.MTU
 }
 
-// ConfPeer is one [Peer] section of awg0.conf, as buoy writes it.
+// ConfPeer is one [Peer] section of awg0.conf, as node writes it.
 //
 // Endpoint is empty for client peers — clients dial the node, so the node never
 // records where to reach them. It is set only for a node→node inner link, where
@@ -60,10 +60,10 @@ type ConfPeer struct {
 // renderConf produces a conf whose [Interface] block is sourced from spec
 // (private key + listen port + obfuscation) and whose [Peer] blocks come from
 // peers. Any obfuscation values arriving from coxswain in a PushConfig are
-// ignored — buoy owns its obfuscation (DESIGN §3); spec is built on the node.
+// ignored — node owns its obfuscation (DESIGN §3); spec is built on the node.
 func renderConf(spec InterfaceSpec, peers []ConfPeer) string {
 	var b strings.Builder
-	b.WriteString("# Managed by buoy — edits will be overwritten.\n")
+	b.WriteString("# Managed by node — edits will be overwritten.\n")
 	b.WriteString("[Interface]\n")
 	fmt.Fprintf(&b, "PrivateKey = %s\n", spec.PrivateKey)
 	fmt.Fprintf(&b, "ListenPort = %d\n", spec.ListenPort)
@@ -90,7 +90,7 @@ func renderConf(spec InterfaceSpec, peers []ConfPeer) string {
 }
 
 // parseConfPeers extracts the [Peer] sections from awg0.conf data. The
-// [Interface] section is ignored — buoy's source of truth for its own
+// [Interface] section is ignored — node's source of truth for its own
 // identity is awg-node.json, not the conf.
 func parseConfPeers(data []byte) ([]ConfPeer, error) {
 	var peers []ConfPeer

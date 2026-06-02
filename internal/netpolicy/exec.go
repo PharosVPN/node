@@ -11,7 +11,7 @@ import (
 )
 
 // allowedBinaries are the only programs the system Exec will run. The argv is
-// built entirely from buoy's own canonical templates (the wire carries only
+// built entirely from node's own canonical templates (the wire carries only
 // three policy bools), so nothing client-controlled reaches a command — this
 // allowlist is defence in depth, guarding against a future templating bug.
 var allowedBinaries = map[string]bool{

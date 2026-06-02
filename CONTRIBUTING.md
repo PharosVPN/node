@@ -1,4 +1,4 @@
-# Contributing to buoy
+# Contributing to node
 
 Thanks for helping build PharosVPN. Before you start, read
 [`docs/DESIGN.md`](https://github.com/PharosVPN/docs/blob/main/DESIGN.md) — the
@@ -30,7 +30,7 @@ and email must be real and match your `git config user.name` / `user.email`.
 
 ## Wire contracts
 
-`buoy` implements protobuf contracts `coxswain` owns. `proto/` holds a vendored
+`node` implements protobuf contracts `coxswain` owns. `proto/` holds a vendored
 copy of `docs/proto/`; generated Go lives in `internal/gen/` and is committed.
 Never edit the generated code or the vendored proto in place — change the
 canonical schema in `docs/proto/`, re-vendor, and run `buf generate`. See
@@ -53,7 +53,7 @@ generated on the node and must never appear in this repo.
 
 ## Licence
 
-buoy is licensed **Apache-2.0**. Every source file carries the SPDX
+node is licensed **Apache-2.0**. Every source file carries the SPDX
 header:
 
 ```

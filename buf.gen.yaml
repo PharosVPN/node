@@ -3,7 +3,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/PharosVPN/buoy/internal/gen
+      value: github.com/PharosVPN/node/internal/gen
 plugins:
   - local: protoc-gen-go
     out: internal/gen

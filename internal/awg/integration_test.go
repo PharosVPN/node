@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
 )
 
 // TestLiveAmneziaWG drives the Manager against a real `awg`/`awg-quick`
-// pipeline. It exercises the full coxswain→buoy data-plane handoff that B2 is
+// pipeline. It exercises the full coxswain→node data-plane handoff that B2 is
 // the unblocker for: PushConfig brings the interface up; ListPeers shows the
 // pushed peers; AddPeer mutates live state; RemovePeer reverts it.
 //
@@ -38,7 +38,7 @@ func TestLiveAmneziaWG(t *testing.T) {
 
 	// Use a collision-safe interface name so the test never touches a real
 	// awg0 on a dev machine.
-	const iface = "awg-buoyit"
+	const iface = "awg-nodeit"
 	dir := t.TempDir()
 	confPath := filepath.Join(dir, iface+".conf")
 	node, err := Load(filepath.Join(dir, "awg-node.json"))
@@ -77,8 +77,8 @@ func TestLiveAmneziaWG(t *testing.T) {
 		t.Fatalf("ListPeers = %d peers, want 2", len(listed))
 	}
 
-	addReq := &buoyv1.Peer{
-		Protocol:   buoyv1.Protocol_PROTOCOL_AMNEZIAWG,
+	addReq := &nodev1.Peer{
+		Protocol:   nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 		PublicKey:  keyC,
 		AllowedIps: []string{"10.66.66.4/32"},
 	}

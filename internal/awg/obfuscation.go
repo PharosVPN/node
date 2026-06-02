@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (C) 2026 The PharosVPN Authors
 
-// Package awg manages a buoy node's AmneziaWG server identity: its WireGuard
+// Package awg manages a node node's AmneziaWG server identity: its WireGuard
 // keypair and its per-node-random obfuscation parameter set.
 //
 // Each node randomises its own obfuscation set — never fleet-wide — for
@@ -17,7 +17,7 @@ import (
 	"math/big"
 	"strings"
 
-	buoyv1 "github.com/PharosVPN/buoy/internal/gen/pharos/buoy/v1"
+	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
 )
 
 // Obfuscation bounds. The ranges keep handshakes performant while still
@@ -56,7 +56,7 @@ type Obfuscation struct {
 	H2   uint32 `json:"h2"`
 	H3   uint32 `json:"h3"`
 	H4   uint32 `json:"h4"`
-	// I1-I5 are special-junk packet templates. buoy leaves them empty; the
+	// I1-I5 are special-junk packet templates. node leaves them empty; the
 	// fields exist so a persisted set round-trips the full schema.
 	I1 string `json:"i1,omitempty"`
 	I2 string `json:"i2,omitempty"`
@@ -150,8 +150,8 @@ func (o Obfuscation) Validate() error {
 }
 
 // toProto converts the set to its wire form.
-func (o Obfuscation) toProto() *buoyv1.AmneziaWGObfuscation {
-	return &buoyv1.AmneziaWGObfuscation{
+func (o Obfuscation) toProto() *nodev1.AmneziaWGObfuscation {
+	return &nodev1.AmneziaWGObfuscation{
 		Jc: o.Jc, Jmin: o.Jmin, Jmax: o.Jmax,
 		S1: o.S1, S2: o.S2, S3: o.S3, S4: o.S4,
 		H1: o.H1, H2: o.H2, H3: o.H3, H4: o.H4,
@@ -162,7 +162,7 @@ func (o Obfuscation) toProto() *buoyv1.AmneziaWGObfuscation {
 // ObfuscationFromProto converts a wire obfuscation set to the local form. Used
 // for a cascade inner link, whose [Interface] adopts the exit node's set so the
 // handshake to the exit matches (DESIGN §3).
-func ObfuscationFromProto(p *buoyv1.AmneziaWGObfuscation) Obfuscation {
+func ObfuscationFromProto(p *nodev1.AmneziaWGObfuscation) Obfuscation {
 	if p == nil {
 		return Obfuscation{}
 	}
@@ -174,7 +174,7 @@ func ObfuscationFromProto(p *buoyv1.AmneziaWGObfuscation) Obfuscation {
 	}
 }
 
-// Render renders the obfuscation parameters as the lines buoy writes into the
+// Render renders the obfuscation parameters as the lines node writes into the
 // [Interface] section of a conf. The data-plane writer applies the conf so the
 // served config matches exactly what GetStatus reports.
 func (o Obfuscation) Render() string {
