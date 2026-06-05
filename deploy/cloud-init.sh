@@ -22,6 +22,13 @@ apt-get install -y "linux-headers-$(uname -r)" amneziawg amneziawg-tools
 cat >/etc/sysctl.d/99-pharos.conf <<'EOF'
 net.ipv4.ip_forward=1
 net.ipv6.conf.all.forwarding=1
+# Cascade routing is asymmetric: a device's packets arrive on the inner-link
+# adapter (awg1/awg0) while the return path leaves a different interface, so
+# reverse-path filtering — even Ubuntu's default "loose" (2) — silently drops
+# them and multi-hop egress black-holes. Turn rp_filter off; new awg interfaces
+# inherit the default. (decision 16 / node cascade.)
+net.ipv4.conf.all.rp_filter=0
+net.ipv4.conf.default.rp_filter=0
 EOF
 sysctl --system
 
