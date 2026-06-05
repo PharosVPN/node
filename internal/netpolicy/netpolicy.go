@@ -129,13 +129,18 @@ func (p Policy) Rules() Rules {
 	//
 	// A return from the exit arrives on the inner interface, but the route back
 	// to its source (the public destination) is the egress interface — an
-	// asymmetric path that reverse-path filtering drops, even in loose mode, so
-	// the entry silently fails to forward returns to the client. Relax rp_filter
-	// while the node carries transits. The effective value is max(all, iface),
-	// so `all` must be relaxed — relaxing only the inner interface is a no-op.
+	// asymmetric path that reverse-path filtering drops, even in loose mode (2),
+	// so the entry silently fails to forward returns to the client. The effective
+	// value is max(conf.all, conf.<iface>): relaxing `all` ALONE is a no-op while
+	// the receiving interface keeps the inherited default (2) — both must be 0.
+	// Relax `default` so every wg interface inherits 0 when it is created (covers
+	// the inner interface without racing its bring-up). Not restored on teardown:
+	// resetting `all` to 2 would re-break any other transit still up. (Proven
+	// live 2026-06: `all=0` alone left awg1 at 2 and the cascade black-holed.)
 	if len(p.Transits) > 0 {
-		r.PreUp = append(r.PreUp, "sysctl -w net.ipv4.conf.all.rp_filter=0")
-		r.PostDown = append(r.PostDown, "sysctl -w net.ipv4.conf.all.rp_filter=2")
+		r.PreUp = append(r.PreUp,
+			"sysctl -w net.ipv4.conf.all.rp_filter=0",
+			"sysctl -w net.ipv4.conf.default.rp_filter=0")
 	}
 	for _, t := range p.Transits {
 		mark := strconv.FormatUint(uint64(t.Mark), 10)
@@ -143,7 +148,9 @@ func (p Policy) Rules() Rules {
 		r.PostUp = append(r.PostUp,
 			"iptables -t mangle -A PREROUTING -i "+ifaceToken+" -s "+t.DeviceCIDR+" -j MARK --set-mark "+mark,
 			"ip rule add fwmark "+mark+" lookup "+table,
-			"ip route add default dev "+t.InnerInterface+" table "+table)
+			// `replace` not `add`: a 2nd device binding the same path reuses this
+			// per-path table+inner interface; `add` fails with "File exists".
+			"ip route replace default dev "+t.InnerInterface+" table "+table)
 		r.PostDown = append(r.PostDown,
 			"ip route del default dev "+t.InnerInterface+" table "+table,
 			"ip rule del fwmark "+mark+" lookup "+table,

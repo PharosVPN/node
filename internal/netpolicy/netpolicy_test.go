@@ -8,6 +8,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -133,12 +134,17 @@ func TestTransitRulesCanonical(t *testing.T) {
 	wantUp := []string{
 		"iptables -t mangle -A PREROUTING -i %i -s 10.8.0.5/32 -j MARK --set-mark 100",
 		"ip rule add fwmark 100 lookup 100",
-		"ip route add default dev awg1 table 100",
+		// `replace`, not `add` — idempotent so a 2nd device on the same path
+		// doesn't fail with "File exists" (the live cascade-bind regression).
+		"ip route replace default dev awg1 table 100",
 	}
 	for _, w := range wantUp {
 		if !containsLine(r.PostUp, w) {
 			t.Errorf("PostUp missing %q\n got: %#v", w, r.PostUp)
 		}
+	}
+	if containsLine(r.PostUp, "ip route add default dev awg1 table 100") {
+		t.Errorf("transit route must use `ip route replace`, not `add` (idempotency)\n got: %#v", r.PostUp)
 	}
 	wantDown := []string{
 		"ip route del default dev awg1 table 100",
@@ -152,13 +158,20 @@ func TestTransitRulesCanonical(t *testing.T) {
 	}
 
 	// A transit node forwards returns asymmetrically (in on the inner interface,
-	// route-back via egress), which rp_filter drops — so the cascade entry must
-	// relax it while it carries transits, and restore it on teardown.
-	if !containsLine(r.PreUp, "sysctl -w net.ipv4.conf.all.rp_filter=0") {
-		t.Errorf("PreUp missing the rp_filter relax\n got: %#v", r.PreUp)
+	// route-back via egress), which rp_filter drops. The effective value is
+	// max(conf.all, conf.<iface>), so BOTH all and default must be relaxed —
+	// relaxing `all` alone leaves the interface at its inherited 2 and the cascade
+	// black-holes (the live regression this guards).
+	if !containsLine(r.PreUp, "sysctl -w net.ipv4.conf.all.rp_filter=0") ||
+		!containsLine(r.PreUp, "sysctl -w net.ipv4.conf.default.rp_filter=0") {
+		t.Errorf("PreUp must relax both all AND default rp_filter (all alone is a no-op)\n got: %#v", r.PreUp)
 	}
-	if !containsLine(r.PostDown, "sysctl -w net.ipv4.conf.all.rp_filter=2") {
-		t.Errorf("PostDown missing the rp_filter restore\n got: %#v", r.PostDown)
+	// Must NOT reset rp_filter to 2 on teardown — that re-breaks any other transit
+	// still up.
+	for _, d := range r.PostDown {
+		if strings.Contains(d, "rp_filter=2") {
+			t.Errorf("PostDown must not reset rp_filter to 2\n got: %#v", r.PostDown)
+		}
 	}
 }
 
