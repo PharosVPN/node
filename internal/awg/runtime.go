@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -110,6 +111,15 @@ func (r *ExecRuntime) Up(ctx context.Context, confPath string) error {
 		return fmt.Errorf("awg-quick up %s: %w (output: %s)",
 			confPath, err, redactOutput(out))
 	}
+	// Cascade traffic crosses adapters asymmetrically; reverse-path filtering —
+	// even "loose" (2) — silently drops it. The effective value is max(conf.all,
+	// conf.<iface>), and an interface created before a default-rp_filter relax
+	// keeps its inherited value, so force it off on THIS interface (and globally)
+	// right after bring-up. Best-effort: a sysctl failure must not fail bring-up,
+	// and this backstops the cloud-init/netpolicy relax (it bit the cascade twice).
+	iface := strings.TrimSuffix(filepath.Base(confPath), ".conf")
+	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.conf.all.rp_filter=0").Run()
+	_ = exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.conf."+iface+".rp_filter=0").Run()
 	return nil
 }
 
