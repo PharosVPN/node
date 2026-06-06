@@ -10,3 +10,4 @@ node.csr
 
 # OS / editor cruft
 .DS_Store
+bin/
