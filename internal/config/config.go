@@ -30,6 +30,9 @@ const (
 	// AWGStateFile holds the node's AmneziaWG server identity — its keypair
 	// and obfuscation set. node generates it once and reuses it (DESIGN §3).
 	AWGStateFile = "awg-node.json"
+	// XRayStateFile holds the node's XRay/REALITY server identity — its
+	// Curve25519 keypair. node generates it once and reuses it (DESIGN §3).
+	XRayStateFile = "xray-node.json"
 	// AWGRevisionFile persists the last applied PushConfig revision so the
 	// optimistic-concurrency guard survives a restart.
 	AWGRevisionFile = "awg-revision"
@@ -79,6 +82,9 @@ func (c Config) CACertPath() string { return filepath.Join(c.Dir, CACertFile) }
 
 // AWGStatePath is the absolute path to the node's AmneziaWG identity file.
 func (c Config) AWGStatePath() string { return filepath.Join(c.Dir, AWGStateFile) }
+
+// XRayStatePath is the absolute path to the node's XRay/REALITY identity file.
+func (c Config) XRayStatePath() string { return filepath.Join(c.Dir, XRayStateFile) }
 
 // AWGRevisionPath is the absolute path to the last-applied PushConfig
 // revision file.
