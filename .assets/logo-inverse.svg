@@ -1,0 +1,16 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="phLogoInvTitle phLogoInvDesc">
+  <title id="phLogoInvTitle">PharosVPN logo mark (inverse)</title>
+  <desc id="phLogoInvDesc">Ivory mark on maroon — for favicons, app icons, social avatars, and dark surfaces.</desc>
+  <rect width="1024" height="1024" fill="#5A1F2B"/>
+  <g fill="#F4EBDD">
+    <path d="M512 208C644 208 759 258 830 336V500C830 654 695 785 512 842C329 785 194 654 194 500V336C265 258 380 208 512 208ZM512 266C397 266 296 306 236 368V500C236 624 347 733 512 786C677 733 788 624 788 500V368C728 306 627 266 512 266Z"/>
+    <path d="M486 170H538L558 502H466L486 170Z"/>
+    <path d="M476 618H548L538 760H486L476 618Z"/>
+    <path d="M278 356C336 309 421 280 512 280C603 280 688 309 746 356V414C680 361 602 334 512 334C422 334 344 361 278 414V356Z"/>
+    <path d="M308 452C361 407 432 382 512 382C592 382 663 407 716 452L684 506C640 468 582 448 512 448C442 448 384 468 340 506L308 452Z"/>
+    <path d="M370 552C407 514 456 494 512 494C568 494 617 514 654 552L622 606C592 581 556 568 512 568C468 568 432 581 402 606L370 552Z"/>
+    <path d="M330 632C379 679 440 704 512 704C584 704 645 679 694 632L724 686C670 740 595 772 512 772C429 772 354 740 300 686L330 632Z"/>
+    <circle cx="512" cy="512" r="48"/>
+  </g>
+  <circle cx="512" cy="512" r="18" fill="#5A1F2B"/>
+</svg>
