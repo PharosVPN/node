@@ -232,14 +232,16 @@ func (s *service) pushXRay(_ context.Context, req *nodev1.PushConfigRequest) (*n
 	return &nodev1.PushConfigResponse{AppliedRevision: applied, Reloaded: reloaded}, nil
 }
 
-// xrayClientID returns the VLESS UUID for an XRay peer. The UUID is carried in
-// the peer's id; public_key is accepted as a fallback so a single string field
-// identifies the client on either AddPeer (peer.id) or RemovePeer (public_key).
+// xrayClientID returns the VLESS UUID for an XRay peer. coxswain carries the
+// UUID in the peer's public_key field (peers.public_key holds the UUID for
+// XRay, the WireGuard key for AmneziaWG); peer.id is coxswain's row id, not the
+// UUID. RemovePeer likewise identifies an XRay client by public_key. id is only
+// a fallback for a caller that put the UUID there.
 func xrayClientID(p *nodev1.Peer) string {
-	if id := p.GetId(); id != "" {
-		return id
+	if pk := p.GetPublicKey(); pk != "" {
+		return pk
 	}
-	return p.GetPublicKey()
+	return p.GetId()
 }
 
 // AddPeer adds one peer live. AmneziaWG adds a WireGuard peer; XRay/REALITY

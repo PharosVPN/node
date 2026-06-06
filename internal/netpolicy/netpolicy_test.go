@@ -226,9 +226,9 @@ func TestResolveSubstitutesTokens(t *testing.T) {
 
 // fakeExec records every command and can be told to fail on a chosen one.
 type fakeExec struct {
-	runs     [][]string
-	failOn   string // substring; if a command joins to contain it, Run errors
-	missOnDel bool  // delete commands (-D) error, simulating "rule not present"
+	runs      [][]string
+	failOn    string // substring; if a command joins to contain it, Run errors
+	missOnDel bool   // delete commands (-D) error, simulating "rule not present"
 }
 
 func (f *fakeExec) Run(_ context.Context, argv []string) error {
