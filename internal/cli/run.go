@@ -14,6 +14,7 @@ import (
 	"github.com/PharosVPN/node/internal/config"
 	"github.com/PharosVPN/node/internal/control"
 	"github.com/PharosVPN/node/internal/netpolicy"
+	"github.com/PharosVPN/node/internal/xray"
 	"github.com/spf13/cobra"
 )
 
@@ -80,6 +81,19 @@ func newRunCmd() *cobra.Command {
 				})
 			})
 
+			// The node's XRay/REALITY identity, like the AmneziaWG one, is
+			// generated once and reused so the public key coxswain caches stays
+			// stable (DESIGN §3). The runtime starts down; coxswain brings it up
+			// with PushConfig once it provisions a REALITY device.
+			xrayID, err := xray.Load(cfg.XRayStatePath())
+			if err != nil {
+				return err
+			}
+			xrayRT := xray.NewRuntime(xrayID, log)
+			log.Info("XRay/REALITY node identity ready",
+				"public_key", xrayID.PublicKey(),
+				"state_file", cfg.XRayStatePath())
+
 			// The network-policy applier owns the node's forwarding /
 			// masquerade / isolation firewall state (decision 16).
 			netPolicy, err := netpolicy.New(netpolicy.Options{
@@ -102,6 +116,7 @@ func newRunCmd() *cobra.Command {
 				AWGNode:      awgNode,
 				AWGRegistry:  awgReg,
 				NetPolicy:    netPolicy,
+				XRay:         xrayRT,
 				Log:          log,
 			})
 			if err != nil {

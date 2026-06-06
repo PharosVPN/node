@@ -23,6 +23,7 @@ import (
 	"github.com/PharosVPN/node/internal/awg"
 	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
 	"github.com/PharosVPN/node/internal/netpolicy"
+	"github.com/PharosVPN/node/internal/xray"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -55,6 +56,10 @@ type Options struct {
 	// NetPolicy applies the node's forwarding / masquerade / isolation policy
 	// and backs SetNetworkConfig (decision 16).
 	NetPolicy *netpolicy.Applier
+	// XRay is the node's embedded XRay/REALITY data plane — its REALITY
+	// identity (reported by GetStatus) and the VLESS client set / camouflage
+	// policy coxswain pushes. Optional; nil leaves XRay calls Unimplemented.
+	XRay *xray.Runtime
 	// Log receives server diagnostics.
 	Log *slog.Logger
 }
@@ -68,7 +73,7 @@ func NewServer(opts Options) (*Server, error) {
 	}
 
 	gs := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
-	nodev1.RegisterNodeControlServer(gs, newService(opts.Version, opts.AWGNode, opts.AWGRegistry, opts.NetPolicy))
+	nodev1.RegisterNodeControlServer(gs, newService(opts.Version, opts.AWGNode, opts.AWGRegistry, opts.NetPolicy, opts.XRay))
 
 	return &Server{addr: opts.ListenAddr, grpc: gs, log: opts.Log}, nil
 }
