@@ -81,6 +81,9 @@ message Peer {
   // support endpoint diversity and rotation (DESIGN §3, decision 17); a
   // single address is still a one-element array.
   repeated string endpoints = 6;
+  // flow is the XRay VLESS flow for an XRAY_REALITY peer (e.g.
+  // "xtls-rprx-vision"); empty for AmneziaWG.
+  string flow = 7;
 }
 
 // PeerState is a Peer plus its runtime state on the node.
@@ -101,6 +104,10 @@ message GetStatusResponse {
   // has configured awg0. caravel needs these exact values to build a tunnel
   // that handshakes (DESIGN §3). Absent until the data plane is up.
   AmneziaWGInfo amneziawg = 4;
+  // xray is the node's XRay/REALITY server identity (its REALITY public key),
+  // populated once node has started the XRay service. caravel needs the public
+  // key to build a REALITY client. Absent until the XRay data plane is up.
+  XRayRealityInfo xray = 5;
 }
 
 // ServiceStatus is the health of one protocol's data-plane service.
@@ -119,6 +126,14 @@ message AmneziaWGInfo {
   string public_key = 1;
   // obfuscation is the node's obfuscation parameter set.
   AmneziaWGObfuscation obfuscation = 2;
+}
+
+// XRayRealityInfo is a node's XRay/REALITY server identity, as node configured
+// it. The node owns the REALITY keypair (like its AmneziaWG obfuscation) and
+// reports the public key here so caravel can build a matching REALITY client.
+message XRayRealityInfo {
+  // public_key is the node's REALITY x25519 public key (base64url).
+  string public_key = 1;
 }
 
 // AmneziaWGObfuscation is one node's AmneziaWG obfuscation parameters. Each
@@ -170,7 +185,7 @@ message PushConfigRequest {
   // per protocol so node can decode it without out-of-band knowledge:
   //
   //   - PROTOCOL_AMNEZIAWG: proto.Marshal of AmneziaWGConfig.
-  //   - PROTOCOL_XRAY_REALITY: TBD (B3).
+  //   - PROTOCOL_XRAY_REALITY: proto.Marshal of XRayRealityConfig.
   //
   // Unknown protocols return Unimplemented.
   bytes config = 3;
@@ -188,6 +203,28 @@ message PushConfigResponse {
 // nothing else.
 message AmneziaWGConfig {
   repeated Peer peers = 1;
+}
+
+// XRayRealityConfig is the PushConfigRequest.config payload for
+// PROTOCOL_XRAY_REALITY: the VLESS client set plus the REALITY server policy
+// coxswain wants applied. The node owns the REALITY keypair (reported via
+// XRayRealityInfo), so it is absent here — coxswain sends the clients and the
+// camouflage policy, nothing secret.
+message XRayRealityConfig {
+  // peers are the VLESS clients (Peer.public_key = client UUID, Peer.flow =
+  // e.g. "xtls-rprx-vision").
+  repeated Peer peers = 1;
+  // dest is the REALITY decoy/target to borrow a TLS handshake from, host:port
+  // (e.g. "www.microsoft.com:443").
+  string dest = 2;
+  // server_names are the SNI values the node accepts (must include the decoy
+  // host, e.g. ["www.microsoft.com"]).
+  repeated string server_names = 3;
+  // short_ids are the allowed REALITY shortIds (an entry of "" allows clients
+  // that send no shortId).
+  repeated string short_ids = 4;
+  // port is the TCP port the XRay inbound listens on (e.g. 443).
+  uint32 port = 5;
 }
 
 // NetworkConfig is a node's traffic-handling policy (DESIGN §3, decision 16).
