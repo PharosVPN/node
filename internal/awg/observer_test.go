@@ -279,6 +279,66 @@ func TestObserverSubscribeIsolated(t *testing.T) {
 	if dropped == 0 {
 		t.Errorf("expected drops on the slow subscriber, got 0")
 	}
+	// The observer-wide counter (surfaced by Run's drop ticker + DroppedTotal)
+	// must mirror the per-subscriber sum so silent loss is observable.
+	if o.DroppedTotal() != dropped {
+		t.Errorf("DroppedTotal() = %d, want %d (per-subscriber sum)", o.DroppedTotal(), dropped)
+	}
+}
+
+// TestObserverEmitsShutdownDisconnects proves a graceful stop closes out live
+// peers (LOW-14): every currently-connected peer gets a PEER_DISCONNECTED so
+// coxswain does not leave the session dangling.
+func TestObserverEmitsShutdownDisconnects(t *testing.T) {
+	o, rt, clock := newTestObserver(t)
+	rt.setLivePeer(LivePeer{PublicKey: "LIVE="})
+	o.Poll(context.Background()) // baseline
+
+	ch, cancel := o.Subscribe()
+	defer cancel()
+
+	// Bring the peer up so it is "connected" (upEmitted).
+	*clock = (*clock).Add(10 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "LIVE=", Endpoint: "203.0.113.7:51820", LastHandshake: *clock})
+	o.Poll(context.Background())
+	// Drain the HANDSHAKE_UP + PEER_CONNECTED from coming up.
+	drain(t, ch, 2)
+
+	// Graceful shutdown should emit a PEER_DISCONNECTED for the live peer.
+	o.emitShutdownDisconnects(*clock)
+	evs := drain(t, ch, 1)
+	if len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED {
+		t.Fatalf("events = %v, want one PEER_DISCONNECTED on shutdown", evs)
+	}
+	if evs[0].GetPeerId() != "LIVE=" {
+		t.Errorf("peer_id = %q, want LIVE=", evs[0].GetPeerId())
+	}
+
+	// Idempotent: a second call must not re-emit (upEmitted was cleared).
+	o.emitShutdownDisconnects(*clock)
+	select {
+	case ev := <-ch:
+		t.Fatalf("second shutdown emit produced %v, want none", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestObserverShutdownSkipsIdlePeer proves a present-but-not-connected peer
+// (no handshake, never upEmitted) does not get a spurious shutdown disconnect.
+func TestObserverShutdownSkipsIdlePeer(t *testing.T) {
+	o, rt, _ := newTestObserver(t)
+	rt.setLivePeer(LivePeer{PublicKey: "IDLE="})
+	o.Poll(context.Background()) // baseline; peer present but never handshaked
+
+	ch, cancel := o.Subscribe()
+	defer cancel()
+
+	o.emitShutdownDisconnects(o.now())
+	select {
+	case ev := <-ch:
+		t.Fatalf("idle peer got a shutdown disconnect %v, want none", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
 }
 
 // TestObserverSubscribeCancelClosesChannel proves the cancel func releases

@@ -26,6 +26,11 @@ const (
 // than blocking the observer or freezing peer streams.
 const subscriberBuffer = 256
 
+// dropReportInterval is how often Run checks whether the cumulative dropped
+// count advanced and, if so, logs it. A slow WatchEvents consumer sheds events
+// silently otherwise; this surfaces the loss at a bounded, rate-limited cadence.
+const dropReportInterval = 60 * time.Second
+
 // Observer polls the AmneziaWG runtime, diffs the snapshot against the
 // previous one, and emits events to its subscribers. It is the single
 // source of truth for the cumulative counters coxswain sees on GetMetrics
@@ -44,6 +49,10 @@ type Observer struct {
 
 	handshakes atomic.Uint64
 	errors     atomic.Uint64
+	// dropped is the cumulative count of events shed because some subscriber's
+	// buffer was full (summed across all subscribers, all time). It mirrors the
+	// per-subscriber counters but is observer-wide so Run can surface silent loss.
+	dropped atomic.Uint64
 }
 
 // peerState is the observer's memory of one peer between polls.
@@ -93,6 +102,11 @@ func (o *Observer) HandshakesTotal() uint64 { return o.handshakes.Load() }
 // was expected to be observable.
 func (o *Observer) ErrorsTotal() uint64 { return o.errors.Load() }
 
+// DroppedTotal is the cumulative count of events shed because a subscriber's
+// buffer was full. A non-zero, growing value means a WatchEvents consumer is
+// too slow and is losing live events.
+func (o *Observer) DroppedTotal() uint64 { return o.dropped.Load() }
+
 // Subscribe registers a new event consumer. The returned cancel function
 // unregisters and closes the channel; the caller must always invoke it
 // (typically via defer) so a disconnected WatchEvents stream cannot leak.
@@ -121,12 +135,29 @@ func (o *Observer) Subscribe() (<-chan *nodev1.Event, func()) {
 func (o *Observer) Run(ctx context.Context) {
 	ticker := time.NewTicker(o.interval)
 	defer ticker.Stop()
+	// Surface silent event loss: a slow WatchEvents consumer's full buffer sheds
+	// events (counted in o.dropped) without blocking the observer, so without
+	// this the loss is invisible. Log only the delta, rate-limited to its ticker.
+	dropTicker := time.NewTicker(dropReportInterval)
+	defer dropTicker.Stop()
+	var lastDropped uint64
 	o.Poll(ctx)
 	for {
 		select {
 		case <-ctx.Done():
+			// On a GRACEFUL shutdown, emit a disconnect for every still-live peer
+			// so coxswain closes those sessions instead of leaving them dangling
+			// (LOW-14). A crash emits nothing — the controller's stream-drop
+			// close-out is the backstop for that — but a clean stop is courteous.
+			o.emitShutdownDisconnects(o.now())
 			o.closeAllSubscribers()
 			return
+		case <-dropTicker.C:
+			if d := o.dropped.Load(); d > lastDropped {
+				o.log.Warn("observer: dropped events (slow WatchEvents consumer)",
+					"dropped_total", d, "dropped_since_last", d-lastDropped)
+				lastDropped = d
+			}
 		case <-ticker.C:
 			o.Poll(ctx)
 		}
@@ -263,15 +294,45 @@ func (o *Observer) broadcast(ev *nodev1.Event) {
 
 // emitLocked fans an event out to every subscriber. A subscriber that is
 // already at buffer capacity loses the event — better than blocking the
-// observer loop or back-pressuring other peers' streams. Drops are
-// counted per-subscriber and logged at the cancel point.
+// observer loop or back-pressuring other peers' streams. Drops are counted
+// per-subscriber and observer-wide; Run's drop ticker surfaces the latter.
 func (o *Observer) emitLocked(ev *nodev1.Event) {
 	for sub := range o.subscribers {
 		select {
 		case sub.ch <- ev:
 		default:
 			sub.dropped.Add(1)
+			o.dropped.Add(1)
 		}
+	}
+}
+
+// emitShutdownDisconnects emits a PEER_DISCONNECTED for every peer the observer
+// currently considers connected (upEmitted), so a graceful node stop closes out
+// live sessions instead of leaving them open in coxswain's history (LOW-14). It
+// flips upEmitted off so a re-poll after this would not double-report. Best
+// effort: a subscriber that has already drained may miss these (the controller's
+// stream-drop close-out covers that case).
+func (o *Observer) emitShutdownDisconnects(now time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.prev == nil {
+		return
+	}
+	for pk, ps := range o.prev {
+		if !ps.upEmitted {
+			continue
+		}
+		o.emitLocked(&nodev1.Event{
+			At:             timestamppb.New(now),
+			Type:           nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED,
+			Protocol:       nodev1.Protocol_PROTOCOL_AMNEZIAWG,
+			PeerId:         pk,
+			SourceEndpoint: ps.endpoint,
+			Message:        "node-shutdown",
+		})
+		ps.upEmitted = false
+		o.prev[pk] = ps
 	}
 }
 
