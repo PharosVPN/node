@@ -79,12 +79,15 @@ func (s *service) GetMetrics(ctx context.Context, _ *nodev1.GetMetricsRequest) (
 // identity, and per-protocol service health.
 func (s *service) GetStatus(ctx context.Context, _ *nodev1.GetStatusRequest) (*nodev1.GetStatusResponse, error) {
 	running, listening, peerCount, detail := s.primary().Status(ctx)
+	newestHsAge, handshaking := s.primary().Liveness(ctx)
 	services := []*nodev1.ServiceStatus{{
-		Protocol:  nodev1.Protocol_PROTOCOL_AMNEZIAWG,
-		Running:   running,
-		Listening: listening,
-		PeerCount: peerCount,
-		Detail:    detail,
+		Protocol:                  nodev1.Protocol_PROTOCOL_AMNEZIAWG,
+		Running:                   running,
+		Listening:                 listening,
+		PeerCount:                 peerCount,
+		Detail:                    detail,
+		NewestHandshakeAgeSeconds: newestHsAge,
+		HandshakingPeers:          handshaking,
 	}}
 
 	resp := &nodev1.GetStatusResponse{
@@ -92,6 +95,9 @@ func (s *service) GetStatus(ctx context.Context, _ *nodev1.GetStatusRequest) (*n
 		UptimeSeconds: int64(time.Since(s.started).Seconds()),
 		Services:      services,
 		Amneziawg:     s.awgNode.Info(),
+		// The revision the node has actually applied — coxswain diffs this
+		// against its intended config_revision to catch a stale data plane.
+		AppliedRevision: s.primary().AppliedRevision(),
 	}
 
 	// XRay/REALITY identity + health. The node always owns a REALITY keypair
@@ -105,6 +111,9 @@ func (s *service) GetStatus(ctx context.Context, _ *nodev1.GetStatusRequest) (*n
 			Listening: xListening,
 			PeerCount: xPeers,
 			Detail:    xDetail,
+			// REALITY has no WireGuard-style handshake to age; not applicable.
+			NewestHandshakeAgeSeconds: -1,
+			HandshakingPeers:          0,
 		})
 		resp.Xray = s.xray.Info()
 	}

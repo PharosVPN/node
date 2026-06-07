@@ -357,9 +357,15 @@ type GetStatusResponse struct {
 	// xray is the node's XRay/REALITY server identity (its REALITY public key),
 	// populated once node has started the XRay service. caravel needs the public
 	// key to build a REALITY client. Absent until the XRay data plane is up.
-	Xray          *XRayRealityInfo `protobuf:"bytes,5,opt,name=xray,proto3" json:"xray,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Xray *XRayRealityInfo `protobuf:"bytes,5,opt,name=xray,proto3" json:"xray,omitempty"`
+	// applied_revision is the AmneziaWG config revision the node has actually
+	// applied (the last PushConfig it accepted, persisted across restart).
+	// coxswain compares this against its intended config_revision to detect a
+	// node serving a stale peer set while otherwise reporting healthy. 0 = the
+	// node has applied no push yet (fresh / cold conf).
+	AppliedRevision int64 `protobuf:"varint,6,opt,name=applied_revision,json=appliedRevision,proto3" json:"applied_revision,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetStatusResponse) Reset() {
@@ -427,17 +433,33 @@ func (x *GetStatusResponse) GetXray() *XRayRealityInfo {
 	return nil
 }
 
+func (x *GetStatusResponse) GetAppliedRevision() int64 {
+	if x != nil {
+		return x.AppliedRevision
+	}
+	return 0
+}
+
 // ServiceStatus is the health of one protocol's data-plane service.
 type ServiceStatus struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Protocol Protocol               `protobuf:"varint,1,opt,name=protocol,proto3,enum=pharos.node.v1.Protocol" json:"protocol,omitempty"`
 	Running  bool                   `protobuf:"varint,2,opt,name=running,proto3" json:"running,omitempty"`
 	// listening reports whether the service is bound to its public port (443).
-	Listening     bool   `protobuf:"varint,3,opt,name=listening,proto3" json:"listening,omitempty"`
-	PeerCount     uint32 `protobuf:"varint,4,opt,name=peer_count,json=peerCount,proto3" json:"peer_count,omitempty"`
-	Detail        string `protobuf:"bytes,5,opt,name=detail,proto3" json:"detail,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Listening bool   `protobuf:"varint,3,opt,name=listening,proto3" json:"listening,omitempty"`
+	PeerCount uint32 `protobuf:"varint,4,opt,name=peer_count,json=peerCount,proto3" json:"peer_count,omitempty"`
+	Detail    string `protobuf:"bytes,5,opt,name=detail,proto3" json:"detail,omitempty"`
+	// newest_handshake_age_seconds is how long ago the most recent successful
+	// handshake completed across this service's peers; -1 if no peer has ever
+	// handshaked. Lets coxswain tell "has peers, all working" apart from "has
+	// peers, nothing handshaking" — the silent-drift signature. (Not meaningful
+	// for stateless protocols; -1 there.)
+	NewestHandshakeAgeSeconds int64 `protobuf:"varint,6,opt,name=newest_handshake_age_seconds,json=newestHandshakeAgeSeconds,proto3" json:"newest_handshake_age_seconds,omitempty"`
+	// handshaking_peers is how many peers handshaked within the liveness window
+	// (recently active). 0 while peer_count > 0 is a stale/broken data plane.
+	HandshakingPeers uint32 `protobuf:"varint,7,opt,name=handshaking_peers,json=handshakingPeers,proto3" json:"handshaking_peers,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ServiceStatus) Reset() {
@@ -503,6 +525,20 @@ func (x *ServiceStatus) GetDetail() string {
 		return x.Detail
 	}
 	return ""
+}
+
+func (x *ServiceStatus) GetNewestHandshakeAgeSeconds() int64 {
+	if x != nil {
+		return x.NewestHandshakeAgeSeconds
+	}
+	return 0
+}
+
+func (x *ServiceStatus) GetHandshakingPeers() uint32 {
+	if x != nil {
+		return x.HandshakingPeers
+	}
+	return 0
 }
 
 // AmneziaWGInfo is a node's AmneziaWG server identity, as node configured it.
@@ -2141,20 +2177,23 @@ const file_pharos_node_v1_control_proto_rawDesc = "" +
 	"\x0elast_handshake\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\rlastHandshake\x12\x19\n" +
 	"\brx_bytes\x18\x03 \x01(\x04R\arxBytes\x12\x19\n" +
 	"\btx_bytes\x18\x04 \x01(\x04R\atxBytes\"\x12\n" +
-	"\x10GetStatusRequest\"\x8c\x02\n" +
+	"\x10GetStatusRequest\"\xb7\x02\n" +
 	"\x11GetStatusResponse\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12%\n" +
 	"\x0euptime_seconds\x18\x02 \x01(\x03R\ruptimeSeconds\x129\n" +
 	"\bservices\x18\x03 \x03(\v2\x1d.pharos.node.v1.ServiceStatusR\bservices\x12;\n" +
 	"\tamneziawg\x18\x04 \x01(\v2\x1d.pharos.node.v1.AmneziaWGInfoR\tamneziawg\x123\n" +
-	"\x04xray\x18\x05 \x01(\v2\x1f.pharos.node.v1.XRayRealityInfoR\x04xray\"\xb4\x01\n" +
+	"\x04xray\x18\x05 \x01(\v2\x1f.pharos.node.v1.XRayRealityInfoR\x04xray\x12)\n" +
+	"\x10applied_revision\x18\x06 \x01(\x03R\x0fappliedRevision\"\xa2\x02\n" +
 	"\rServiceStatus\x124\n" +
 	"\bprotocol\x18\x01 \x01(\x0e2\x18.pharos.node.v1.ProtocolR\bprotocol\x12\x18\n" +
 	"\arunning\x18\x02 \x01(\bR\arunning\x12\x1c\n" +
 	"\tlistening\x18\x03 \x01(\bR\tlistening\x12\x1d\n" +
 	"\n" +
 	"peer_count\x18\x04 \x01(\rR\tpeerCount\x12\x16\n" +
-	"\x06detail\x18\x05 \x01(\tR\x06detail\"v\n" +
+	"\x06detail\x18\x05 \x01(\tR\x06detail\x12?\n" +
+	"\x1cnewest_handshake_age_seconds\x18\x06 \x01(\x03R\x19newestHandshakeAgeSeconds\x12+\n" +
+	"\x11handshaking_peers\x18\a \x01(\rR\x10handshakingPeers\"v\n" +
 	"\rAmneziaWGInfo\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x01 \x01(\tR\tpublicKey\x12F\n" +

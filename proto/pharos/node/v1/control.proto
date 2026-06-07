@@ -108,6 +108,12 @@ message GetStatusResponse {
   // populated once node has started the XRay service. caravel needs the public
   // key to build a REALITY client. Absent until the XRay data plane is up.
   XRayRealityInfo xray = 5;
+  // applied_revision is the AmneziaWG config revision the node has actually
+  // applied (the last PushConfig it accepted, persisted across restart).
+  // coxswain compares this against its intended config_revision to detect a
+  // node serving a stale peer set while otherwise reporting healthy. 0 = the
+  // node has applied no push yet (fresh / cold conf).
+  int64 applied_revision = 6;
 }
 
 // ServiceStatus is the health of one protocol's data-plane service.
@@ -118,6 +124,15 @@ message ServiceStatus {
   bool listening = 3;
   uint32 peer_count = 4;
   string detail = 5;
+  // newest_handshake_age_seconds is how long ago the most recent successful
+  // handshake completed across this service's peers; -1 if no peer has ever
+  // handshaked. Lets coxswain tell "has peers, all working" apart from "has
+  // peers, nothing handshaking" — the silent-drift signature. (Not meaningful
+  // for stateless protocols; -1 there.)
+  int64 newest_handshake_age_seconds = 6;
+  // handshaking_peers is how many peers handshaked within the liveness window
+  // (recently active). 0 while peer_count > 0 is a stale/broken data plane.
+  uint32 handshaking_peers = 7;
 }
 
 // AmneziaWGInfo is a node's AmneziaWG server identity, as node configured it.

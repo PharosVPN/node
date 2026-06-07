@@ -392,6 +392,45 @@ func (m *Manager) Status(ctx context.Context) (running, listening bool, peerCoun
 	return true, true, uint32(len(live)), fmt.Sprintf("awg0 up, %d peers", len(live))
 }
 
+// livenessWindow is how recently a peer must have handshaked to count as
+// "active". WireGuard rekeys well within this when there's traffic; a whole
+// peer set quiet longer than this is the silent-drift signature. Matches the
+// observer's stale threshold.
+const livenessWindow = 180 * time.Second
+
+// Liveness summarises handshake health across the live peer set: the age of the
+// most recent successful handshake (newestAgeSec, or -1 if no peer has ever
+// handshaked) and how many peers handshaked within livenessWindow. coxswain
+// uses this to tell "has peers, all working" apart from "has peers, nothing
+// handshaking" — a stale data plane that otherwise reports green.
+func (m *Manager) Liveness(ctx context.Context) (newestAgeSec int64, handshaking uint32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	live, err := m.runtime.Show(ctx)
+	if err != nil || len(live) == 0 {
+		return -1, 0
+	}
+	newestAgeSec = -1
+	now := time.Now()
+	for _, p := range live {
+		if p.LastHandshake.IsZero() {
+			continue
+		}
+		age := int64(now.Sub(p.LastHandshake).Seconds())
+		if age < 0 {
+			age = 0 // clock skew between node and the awg timestamp
+		}
+		if newestAgeSec < 0 || age < newestAgeSec {
+			newestAgeSec = age
+		}
+		if now.Sub(p.LastHandshake) < livenessWindow {
+			handshaking++
+		}
+	}
+	return newestAgeSec, handshaking
+}
+
 // --- internals --------------------------------------------------------------
 
 // applyConf reloads awg0 from the on-disk conf. The first call brings the

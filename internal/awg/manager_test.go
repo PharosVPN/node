@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	nodev1 "github.com/PharosVPN/node/internal/gen/pharos/node/v1"
 )
@@ -616,4 +617,45 @@ func TestReconcileNoConfIsNoop(t *testing.T) {
 	if got := rt.callCount("Up") + rt.callCount("SyncConf"); got != 0 {
 		t.Errorf("Reconcile on fresh node ran %d apply calls, want 0", got)
 	}
+}
+
+// TestLiveness checks the handshake-liveness summary coxswain uses to spot a
+// stale data plane (the silent-drift signature: peers present, none handshaking).
+func TestLiveness(t *testing.T) {
+	now := time.Now()
+	ctx := context.Background()
+
+	t.Run("no peers", func(t *testing.T) {
+		mgr, _ := newTestManager(t)
+		if age, hs := mgr.Liveness(ctx); age != -1 || hs != 0 {
+			t.Fatalf("empty peer set: got age=%d hs=%d, want -1, 0", age, hs)
+		}
+	})
+
+	t.Run("mixed", func(t *testing.T) {
+		mgr, rt := newTestManager(t)
+		rt.setLivePeer(LivePeer{PublicKey: "RECENT=", LastHandshake: now.Add(-10 * time.Second)})
+		rt.setLivePeer(LivePeer{PublicKey: "OLD=", LastHandshake: now.Add(-1 * time.Hour)})
+		rt.setLivePeer(LivePeer{PublicKey: "NEVER="}) // zero LastHandshake
+		age, hs := mgr.Liveness(ctx)
+		if age < 0 || age > 60 {
+			t.Errorf("newest handshake age = %d, want ~10s", age)
+		}
+		if hs != 1 {
+			t.Errorf("handshaking peers = %d, want 1 (only the recent one within the window)", hs)
+		}
+	})
+
+	t.Run("all stale is the silent-drift signature", func(t *testing.T) {
+		mgr, rt := newTestManager(t)
+		rt.setLivePeer(LivePeer{PublicKey: "A=", LastHandshake: now.Add(-2 * time.Hour)})
+		rt.setLivePeer(LivePeer{PublicKey: "B=", LastHandshake: now.Add(-3 * time.Hour)})
+		age, hs := mgr.Liveness(ctx)
+		if hs != 0 {
+			t.Errorf("handshaking peers = %d, want 0 (peers present, none recent)", hs)
+		}
+		if age <= 0 {
+			t.Errorf("newest handshake age = %d, want a positive age (peers exist but are stale)", age)
+		}
+	})
 }
