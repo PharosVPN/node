@@ -19,7 +19,7 @@ func TestParseShowDump(t *testing.T) {
 	// Line 1 is the interface; lines 2+ are peers (tab-separated).
 	dump := "" +
 		"PRIV\tPUB\t443\toff\n" +
-		"PEERA=\t(none)\t(none)\t10.0.0.2/32\t1747680000\t1024\t2048\toff\n" +
+		"PEERA=\t(none)\t198.51.100.23:51820\t10.0.0.2/32\t1747680000\t1024\t2048\toff\n" +
 		"PEERB=\t(none)\t(none)\t10.0.0.3/32\t0\t0\t0\toff\n"
 
 	peers, err := parseShowDump([]byte(dump))
@@ -32,12 +32,36 @@ func TestParseShowDump(t *testing.T) {
 	if peers[0].PublicKey != "PEERA=" || peers[0].RxBytes != 1024 || peers[0].TxBytes != 2048 {
 		t.Errorf("peer A = %+v", peers[0])
 	}
+	// The endpoint column (field 3) is parsed; a real IP:port is kept verbatim.
+	if peers[0].Endpoint != "198.51.100.23:51820" {
+		t.Errorf("peer A endpoint = %q, want 198.51.100.23:51820", peers[0].Endpoint)
+	}
 	if want := time.Unix(1747680000, 0).UTC(); !peers[0].LastHandshake.Equal(want) {
 		t.Errorf("peer A handshake = %v, want %v", peers[0].LastHandshake, want)
 	}
 	// A peer that has never handshaken reports 0 — node returns zero time.
 	if !peers[1].LastHandshake.IsZero() {
 		t.Errorf("peer B handshake = %v, want zero (never)", peers[1].LastHandshake)
+	}
+	// "(none)" in the endpoint column normalises to the empty string, never a
+	// literal — analytics must not see "(none)" as a source.
+	if peers[1].Endpoint != "" {
+		t.Errorf("peer B endpoint = %q, want \"\" (awg printed (none))", peers[1].Endpoint)
+	}
+}
+
+// TestParseEndpoint covers the endpoint-column normalisation in isolation.
+func TestParseEndpoint(t *testing.T) {
+	cases := map[string]string{
+		"198.51.100.23:51820": "198.51.100.23:51820",
+		"[2001:db8::1]:443":   "[2001:db8::1]:443",
+		"(none)":              "",
+		"":                    "",
+	}
+	for in, want := range cases {
+		if got := parseEndpoint(in); got != want {
+			t.Errorf("parseEndpoint(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

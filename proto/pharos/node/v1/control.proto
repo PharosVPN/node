@@ -376,4 +376,8 @@ message Event {
   // peer_id is set for peer-scoped events.
   string peer_id = 4;
   string message = 5;
+  // source_endpoint is the client's public IP:port for a peer-scoped event
+  // (the awg endpoint column). Empty when the peer has no current endpoint
+  // ("(none)") or for non-peer events. Analytics derives the source IP from it.
+  string source_endpoint = 6;
 }

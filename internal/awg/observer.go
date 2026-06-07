@@ -49,9 +49,11 @@ type Observer struct {
 // peerState is the observer's memory of one peer between polls.
 type peerState struct {
 	lastHandshake time.Time
+	endpoint      string
 	// upEmitted is true if a HANDSHAKE_UP for the current handshake has been
 	// emitted but no matching HANDSHAKE_DOWN has yet — prevents duplicate
-	// stale-handshake events.
+	// stale-handshake events. It also marks a peer as currently "connected",
+	// so a stale handshake emits a PEER_DISCONNECTED exactly once.
 	upEmitted bool
 }
 
@@ -169,7 +171,7 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 	if o.prev == nil {
 		o.prev = make(map[string]peerState, len(cur))
 		for pk, lp := range cur {
-			o.prev[pk] = peerState{lastHandshake: lp.LastHandshake}
+			o.prev[pk] = peerState{lastHandshake: lp.LastHandshake, endpoint: lp.Endpoint}
 		}
 		return
 	}
@@ -177,49 +179,73 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 	next := make(map[string]peerState, len(cur))
 	for pk, lp := range cur {
 		old, was := o.prev[pk]
-		ps := peerState{lastHandshake: lp.LastHandshake, upEmitted: old.upEmitted}
+		ps := peerState{lastHandshake: lp.LastHandshake, endpoint: lp.Endpoint, upEmitted: old.upEmitted}
 
-		if !was {
+		freshHandshake := lp.LastHandshake.After(old.lastHandshake) && !lp.LastHandshake.IsZero()
+		if freshHandshake {
+			// Fresh handshake — initial or rekey. Both count.
+			o.handshakes.Add(1)
 			o.emitLocked(&nodev1.Event{
-				At:       timestamppb.New(now),
-				Type:     nodev1.EventType_EVENT_TYPE_PEER_CONNECTED,
-				Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
-				PeerId:   pk,
+				At:             timestamppb.New(now),
+				Type:           nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP,
+				Protocol:       nodev1.Protocol_PROTOCOL_AMNEZIAWG,
+				PeerId:         pk,
+				SourceEndpoint: lp.Endpoint,
 			})
 		}
 
-		switch {
-		case lp.LastHandshake.After(old.lastHandshake) && !lp.LastHandshake.IsZero():
-			// Fresh handshake — initial or rekey. Both count.
-			o.handshakes.Add(1)
+		// A peer "connects" the moment it transitions into a live handshake
+		// (was idle/new, now handshaking) or when its source endpoint changes
+		// while already up (the client roamed to a new IP:port). Both are real
+		// session boundaries the history must record; emit on the TRANSITION
+		// only, never on every poll.
+		endpointChanged := was && ps.upEmitted && lp.Endpoint != "" && lp.Endpoint != old.endpoint
+		if (freshHandshake && !old.upEmitted) || endpointChanged {
 			ps.upEmitted = true
 			o.emitLocked(&nodev1.Event{
-				At:       timestamppb.New(now),
-				Type:     nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP,
-				Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
-				PeerId:   pk,
+				At:             timestamppb.New(now),
+				Type:           nodev1.EventType_EVENT_TYPE_PEER_CONNECTED,
+				Protocol:       nodev1.Protocol_PROTOCOL_AMNEZIAWG,
+				PeerId:         pk,
+				SourceEndpoint: lp.Endpoint,
 			})
-		case ps.upEmitted && !lp.LastHandshake.IsZero() && now.Sub(lp.LastHandshake) > o.stale:
-			// Previously up; handshake has aged out.
+		} else if freshHandshake {
+			ps.upEmitted = true
+		}
+
+		// A peer "disconnects" when a previously-live handshake ages past the
+		// stale threshold. Emit a HANDSHAKE_DOWN and a PEER_DISCONNECTED so the
+		// session is closed in the history.
+		if ps.upEmitted && !freshHandshake && !lp.LastHandshake.IsZero() && now.Sub(lp.LastHandshake) > o.stale {
 			ps.upEmitted = false
 			o.emitLocked(&nodev1.Event{
-				At:       timestamppb.New(now),
-				Type:     nodev1.EventType_EVENT_TYPE_HANDSHAKE_DOWN,
-				Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
-				PeerId:   pk,
+				At:             timestamppb.New(now),
+				Type:           nodev1.EventType_EVENT_TYPE_HANDSHAKE_DOWN,
+				Protocol:       nodev1.Protocol_PROTOCOL_AMNEZIAWG,
+				PeerId:         pk,
+				SourceEndpoint: lp.Endpoint,
+			})
+			o.emitLocked(&nodev1.Event{
+				At:             timestamppb.New(now),
+				Type:           nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED,
+				Protocol:       nodev1.Protocol_PROTOCOL_AMNEZIAWG,
+				PeerId:         pk,
+				SourceEndpoint: lp.Endpoint,
 			})
 		}
 
 		next[pk] = ps
 	}
 
-	for pk := range o.prev {
+	// A peer removed from the config (no longer in the dump) disconnects too.
+	for pk, old := range o.prev {
 		if _, still := cur[pk]; !still {
 			o.emitLocked(&nodev1.Event{
-				At:       timestamppb.New(now),
-				Type:     nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED,
-				Protocol: nodev1.Protocol_PROTOCOL_AMNEZIAWG,
-				PeerId:   pk,
+				At:             timestamppb.New(now),
+				Type:           nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED,
+				Protocol:       nodev1.Protocol_PROTOCOL_AMNEZIAWG,
+				PeerId:         pk,
+				SourceEndpoint: old.endpoint,
 			})
 		}
 	}

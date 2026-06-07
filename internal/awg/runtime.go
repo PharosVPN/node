@@ -59,6 +59,7 @@ type Runtime interface {
 // LivePeer is the runtime state of one peer on awg0.
 type LivePeer struct {
 	PublicKey     string
+	Endpoint      string    // client's current public IP:port; "" when awg reports "(none)"
 	LastHandshake time.Time // zero when the peer has never handshaken
 	RxBytes       uint64
 	TxBytes       uint64
@@ -292,6 +293,7 @@ func parseShowDump(raw []byte) ([]LivePeer, error) {
 		}
 		p := LivePeer{
 			PublicKey: fields[0],
+			Endpoint:  parseEndpoint(fields[2]),
 			RxBytes:   rx,
 			TxBytes:   tx,
 		}
@@ -301,6 +303,16 @@ func parseShowDump(raw []byte) ([]LivePeer, error) {
 		peers = append(peers, p)
 	}
 	return peers, nil
+}
+
+// parseEndpoint normalises the awg dump endpoint column. awg prints "(none)"
+// for a peer that has no current endpoint (never connected, or roamed away);
+// we treat that as the empty string so it never reaches analytics as a literal.
+func parseEndpoint(raw string) string {
+	if raw == "" || raw == "(none)" {
+		return ""
+	}
+	return raw
 }
 
 // redactPubkey returns the first eight characters of a base64 public key —

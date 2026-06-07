@@ -2086,10 +2086,14 @@ type Event struct {
 	Type     EventType              `protobuf:"varint,2,opt,name=type,proto3,enum=pharos.node.v1.EventType" json:"type,omitempty"`
 	Protocol Protocol               `protobuf:"varint,3,opt,name=protocol,proto3,enum=pharos.node.v1.Protocol" json:"protocol,omitempty"`
 	// peer_id is set for peer-scoped events.
-	PeerId        string `protobuf:"bytes,4,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
-	Message       string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PeerId  string `protobuf:"bytes,4,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	Message string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
+	// source_endpoint is the client's public IP:port for a peer-scoped event
+	// (the awg endpoint column). Empty when the peer has no current endpoint
+	// ("(none)") or for non-peer events. Analytics derives the source IP from it.
+	SourceEndpoint string `protobuf:"bytes,6,opt,name=source_endpoint,json=sourceEndpoint,proto3" json:"source_endpoint,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Event) Reset() {
@@ -2153,6 +2157,13 @@ func (x *Event) GetPeerId() string {
 func (x *Event) GetMessage() string {
 	if x != nil {
 		return x.Message
+	}
+	return ""
+}
+
+func (x *Event) GetSourceEndpoint() string {
+	if x != nil {
+		return x.SourceEndpoint
 	}
 	return ""
 }
@@ -2294,13 +2305,14 @@ const file_pharos_node_v1_control_proto_rawDesc = "" +
 	"\bprotocol\x18\x01 \x01(\x0e2\x18.pharos.node.v1.ProtocolR\bprotocol\"6\n" +
 	"\x16RestartServiceResponse\x12\x1c\n" +
 	"\trestarted\x18\x01 \x01(\bR\trestarted\"\x14\n" +
-	"\x12WatchEventsRequest\"\xcb\x01\n" +
+	"\x12WatchEventsRequest\"\xf4\x01\n" +
 	"\x05Event\x12*\n" +
 	"\x02at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12-\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x19.pharos.node.v1.EventTypeR\x04type\x124\n" +
 	"\bprotocol\x18\x03 \x01(\x0e2\x18.pharos.node.v1.ProtocolR\bprotocol\x12\x17\n" +
 	"\apeer_id\x18\x04 \x01(\tR\x06peerId\x12\x18\n" +
-	"\amessage\x18\x05 \x01(\tR\amessage*W\n" +
+	"\amessage\x18\x05 \x01(\tR\amessage\x12'\n" +
+	"\x0fsource_endpoint\x18\x06 \x01(\tR\x0esourceEndpoint*W\n" +
 	"\bProtocol\x12\x18\n" +
 	"\x14PROTOCOL_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12PROTOCOL_AMNEZIAWG\x10\x01\x12\x19\n" +

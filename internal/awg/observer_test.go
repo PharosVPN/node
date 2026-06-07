@@ -62,20 +62,37 @@ func TestObserverBaselineSilent(t *testing.T) {
 }
 
 func TestObserverEmitsPeerConnected(t *testing.T) {
-	o, rt, _ := newTestObserver(t)
+	o, rt, clock := newTestObserver(t)
+	// A peer present-but-idle (no handshake) is the baseline — it is not yet a
+	// session. Connecting is the handshake transition.
+	rt.setLivePeer(LivePeer{PublicKey: "NEW="})
+	o.Poll(context.Background()) // baseline
+
 	ch, cancel := o.Subscribe()
 	defer cancel()
-	o.Poll(context.Background()) // baseline (empty)
 
-	rt.setLivePeer(LivePeer{PublicKey: "NEW="})
+	// The peer completes its first handshake from a known endpoint — it now
+	// has a live session, so we expect a HANDSHAKE_UP and a PEER_CONNECTED,
+	// both carrying the source endpoint and the peer public key.
+	*clock = (*clock).Add(10 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "NEW=", Endpoint: "203.0.113.7:51820", LastHandshake: *clock})
 	o.Poll(context.Background())
 
-	evs := drain(t, ch, 1)
-	if len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_PEER_CONNECTED {
-		t.Fatalf("events = %v, want one PEER_CONNECTED", evs)
+	evs := drain(t, ch, 2)
+	var connected *nodev1.Event
+	for _, e := range evs {
+		if e.GetType() == nodev1.EventType_EVENT_TYPE_PEER_CONNECTED {
+			connected = e
+		}
 	}
-	if evs[0].GetPeerId() != "NEW=" {
-		t.Errorf("peer_id = %q, want NEW=", evs[0].GetPeerId())
+	if connected == nil {
+		t.Fatalf("events = %v, want a PEER_CONNECTED", evs)
+	}
+	if connected.GetPeerId() != "NEW=" {
+		t.Errorf("peer_id = %q, want NEW=", connected.GetPeerId())
+	}
+	if connected.GetSourceEndpoint() != "203.0.113.7:51820" {
+		t.Errorf("source_endpoint = %q, want 203.0.113.7:51820", connected.GetSourceEndpoint())
 	}
 }
 
@@ -107,7 +124,8 @@ func TestObserverEmitsHandshakeUpAndCounts(t *testing.T) {
 	ch, cancel := o.Subscribe()
 	defer cancel()
 
-	// A handshake completes.
+	// A handshake completes — the first one. It emits a HANDSHAKE_UP and, since
+	// the peer was idle until now, a PEER_CONNECTED (the session opens).
 	*clock = (*clock).Add(10 * time.Second)
 	rt.setLivePeer(LivePeer{PublicKey: "P=", LastHandshake: *clock})
 	o.Poll(context.Background())
@@ -115,21 +133,35 @@ func TestObserverEmitsHandshakeUpAndCounts(t *testing.T) {
 	if got := o.HandshakesTotal(); got != 1 {
 		t.Errorf("HandshakesTotal = %d, want 1", got)
 	}
-	evs := drain(t, ch, 1)
-	if len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP {
-		t.Fatalf("events = %v, want HANDSHAKE_UP", evs)
+	if !hasType(drain(t, ch, 2), nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP) {
+		t.Fatalf("first handshake did not emit HANDSHAKE_UP")
 	}
 
 	// A rekey advances last_handshake again — second HANDSHAKE_UP, counter 2.
+	// The peer was already up, so no second PEER_CONNECTED.
 	*clock = (*clock).Add(120 * time.Second)
 	rt.setLivePeer(LivePeer{PublicKey: "P=", LastHandshake: *clock})
 	o.Poll(context.Background())
 	if got := o.HandshakesTotal(); got != 2 {
 		t.Errorf("HandshakesTotal after rekey = %d, want 2", got)
 	}
-	if evs := drain(t, ch, 1); len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP {
-		t.Errorf("rekey events = %v, want HANDSHAKE_UP", evs)
+	rekey := drain(t, ch, 2)
+	if !hasType(rekey, nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP) {
+		t.Errorf("rekey events = %v, want a HANDSHAKE_UP", rekey)
 	}
+	if hasType(rekey, nodev1.EventType_EVENT_TYPE_PEER_CONNECTED) {
+		t.Errorf("rekey re-emitted PEER_CONNECTED: %v", rekey)
+	}
+}
+
+// hasType reports whether any event in evs is of type t.
+func hasType(evs []*nodev1.Event, t nodev1.EventType) bool {
+	for _, e := range evs {
+		if e.GetType() == t {
+			return true
+		}
+	}
+	return false
 }
 
 func TestObserverEmitsHandshakeDownOnceWhenStale(t *testing.T) {
@@ -138,25 +170,30 @@ func TestObserverEmitsHandshakeDownOnceWhenStale(t *testing.T) {
 	rt.setLivePeer(LivePeer{PublicKey: "P=", LastHandshake: hs})
 	o.Poll(context.Background()) // baseline with handshake
 
-	// A subsequent poll where the handshake has advanced — emits UP.
+	// A subsequent poll where the handshake has advanced — emits UP (and, as
+	// the session opens, PEER_CONNECTED).
 	ch, cancel := o.Subscribe()
 	defer cancel()
 	*clock = hs.Add(5 * time.Second)
 	rt.setLivePeer(LivePeer{PublicKey: "P=", LastHandshake: *clock})
 	o.Poll(context.Background())
-	if evs := drain(t, ch, 1); len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP {
-		t.Fatalf("priming UP events = %v", evs)
+	if !hasType(drain(t, ch, 2), nodev1.EventType_EVENT_TYPE_HANDSHAKE_UP) {
+		t.Fatalf("priming poll did not emit HANDSHAKE_UP")
 	}
 
-	// Now the handshake ages past the stale threshold (30s).
+	// Now the handshake ages past the stale threshold (30s) — a HANDSHAKE_DOWN
+	// and a PEER_DISCONNECTED close the session.
 	*clock = (*clock).Add(60 * time.Second)
 	o.Poll(context.Background())
-	evs := drain(t, ch, 1)
-	if len(evs) != 1 || evs[0].GetType() != nodev1.EventType_EVENT_TYPE_HANDSHAKE_DOWN {
-		t.Fatalf("stale events = %v, want HANDSHAKE_DOWN", evs)
+	stale := drain(t, ch, 2)
+	if !hasType(stale, nodev1.EventType_EVENT_TYPE_HANDSHAKE_DOWN) {
+		t.Fatalf("stale events = %v, want a HANDSHAKE_DOWN", stale)
+	}
+	if !hasType(stale, nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED) {
+		t.Fatalf("stale events = %v, want a PEER_DISCONNECTED", stale)
 	}
 
-	// A second stale poll must not re-emit DOWN.
+	// A second stale poll must not re-emit DOWN/DISCONNECTED.
 	*clock = (*clock).Add(60 * time.Second)
 	o.Poll(context.Background())
 	select {
@@ -227,11 +264,13 @@ func TestObserverSubscribeIsolated(t *testing.T) {
 		}
 	}()
 
-	// One unique peer per call — each iteration emits one PEER_CONNECTED.
-	// Push well past the buffer so the slow subscriber must shed events.
+	// One unique peer per call, each handshaking immediately — every iteration
+	// emits a HANDSHAKE_UP (and PEER_CONNECTED). Push well past the buffer so
+	// the slow subscriber must shed events.
+	base := time.Unix(1_700_000_100, 0).UTC()
 	for i := 0; i < subscriberBuffer*2; i++ {
 		key := fmt.Sprintf("K%d=", i)
-		rt.setLivePeer(LivePeer{PublicKey: key})
+		rt.setLivePeer(LivePeer{PublicKey: key, LastHandshake: base.Add(time.Duration(i) * time.Second)})
 		o.Poll(context.Background())
 	}
 	_ = slow // unread on purpose
