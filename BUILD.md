@@ -146,7 +146,7 @@ would otherwise be safe today:
 
 `node`'s control channel is a **plain mTLS gRPC server** — `coxswain` dials it
 directly (the node is public). It does **not** need the reverse-tunnel code;
-that belongs to `beacon`. You may adapt the **mTLS setup / CA-verification**
+that belongs to `relay`. You may adapt the **mTLS setup / CA-verification**
 helpers the operator wrote for an earlier private project — and if you do,
 obey the rebrand rule in `docs/BUILD.md` §4 (strip every origin identifier).
 
