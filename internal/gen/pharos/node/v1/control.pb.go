@@ -2092,12 +2092,11 @@ type Event struct {
 	// (the awg endpoint column). Empty when the peer has no current endpoint
 	// ("(none)") or for non-peer events. Analytics derives the source IP from it.
 	SourceEndpoint string `protobuf:"bytes,6,opt,name=source_endpoint,json=sourceEndpoint,proto3" json:"source_endpoint,omitempty"`
-	// rx_bytes and tx_bytes are the bytes transferred DURING the session this
-	// event closes — the session delta, not a cumulative counter. They are set
-	// on a PEER_DISCONNECTED (and the shutdown disconnects): the node captures
-	// the peer's cumulative awg counters as a baseline at PEER_CONNECTED and
-	// reports current−baseline here when the session ends. A PEER_CONNECTED (the
-	// session just started) carries 0. Other event types carry 0.
+	// rx_bytes and tx_bytes are, for peer connect/disconnect events, the peer's
+	// cumulative awg rx/tx counters at that instant (the controller computes
+	// per-session deltas by pairing connect→disconnect). They are set on both
+	// PEER_CONNECTED and PEER_DISCONNECTED (including the shutdown disconnects).
+	// Other event types carry 0.
 	RxBytes       int64 `protobuf:"varint,7,opt,name=rx_bytes,json=rxBytes,proto3" json:"rx_bytes,omitempty"`
 	TxBytes       int64 `protobuf:"varint,8,opt,name=tx_bytes,json=txBytes,proto3" json:"tx_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields

@@ -64,34 +64,14 @@ type peerState struct {
 	// stale-handshake events. It also marks a peer as currently "connected",
 	// so a stale handshake emits a PEER_DISCONNECTED exactly once.
 	upEmitted bool
-	// rxBaseline and txBaseline are the peer's CUMULATIVE awg byte counters at
-	// the moment the current session opened (the FIRST PEER_CONNECTED). The
-	// session's own rx/tx is the current cumulative minus this baseline; the
-	// observer stamps that delta on the PEER_DISCONNECTED that closes the
-	// session. The baseline PERSISTS across endpoint roams: a roam emits a fresh
-	// PEER_CONNECTED (a real source-IP-change signal) but does NOT re-anchor the
-	// baseline, so the full session delta — bytes moved before AND after the
-	// roam — is reported once, at disconnect, attributed to the last endpoint.
-	rxBaseline uint64
-	txBaseline uint64
-	// rxLast and txLast are the most recent cumulative counters seen for this
-	// peer. A peer that vanishes from the dump (config-removed) or a graceful
-	// shutdown has no fresh dump line, so the disconnect's session delta is
-	// computed against this last-seen cumulative.
+	// rxLast and txLast are the most recent CUMULATIVE awg byte counters seen
+	// for this peer. The observer reports these raw cumulative counters on every
+	// PEER_CONNECTED and PEER_DISCONNECTED — the controller pairs connect→
+	// disconnect and computes the per-session delta. A peer that vanishes from
+	// the dump (config-removed) or a graceful shutdown has no fresh dump line,
+	// so its disconnect carries this last-seen cumulative.
 	rxLast uint64
 	txLast uint64
-}
-
-// sessionDelta returns the bytes transferred during the session that opened at
-// the given baseline, given the current cumulative counter. WireGuard counters
-// are monotonic within a peer's lifetime, but a peer re-add (or a rare counter
-// reset) drops current below the baseline; treat that as a fresh count from 0
-// and return current, never an underflowed wrap.
-func sessionDelta(current, baseline uint64) int64 {
-	if current < baseline {
-		return int64(current)
-	}
-	return int64(current - baseline)
 }
 
 type subscriber struct {
@@ -243,15 +223,12 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 	next := make(map[string]peerState, len(cur))
 	for pk, lp := range cur {
 		old, was := o.prev[pk]
-		// Carry the session baseline forward; refresh the last-seen cumulative
-		// to this poll's reading so a later config-removed/shutdown disconnect
-		// has a current counter to delta against.
+		// Refresh the last-seen cumulative to this poll's reading so a later
+		// config-removed/shutdown disconnect has a current counter to report.
 		ps := peerState{
 			lastHandshake: lp.LastHandshake,
 			endpoint:      lp.Endpoint,
 			upEmitted:     old.upEmitted,
-			rxBaseline:    old.rxBaseline,
-			txBaseline:    old.txBaseline,
 			rxLast:        lp.RxBytes,
 			txLast:        lp.TxBytes,
 		}
@@ -273,28 +250,20 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 		// (was idle/new, now handshaking) or when its source endpoint changes
 		// while already up (the client roamed to a new IP:port). Both are real
 		// session boundaries the history must record; emit on the TRANSITION
-		// only, never on every poll.
+		// only, never on every poll. The connect carries the peer's RAW
+		// CUMULATIVE awg counters at this instant — the controller pairs this
+		// connect with the matching disconnect and computes the session delta.
 		endpointChanged := was && ps.upEmitted && lp.Endpoint != "" && lp.Endpoint != old.endpoint
-		roam := endpointChanged && old.upEmitted
 		if (freshHandshake && !old.upEmitted) || endpointChanged {
 			ps.upEmitted = true
-			// On a genuine NEW session (peer was not already up), anchor the byte
-			// baseline to the peer's current cumulative counters so the closing
-			// disconnect reports only this session's traffic. On a ROAM (peer was
-			// already up, just changed source endpoint) DO NOT re-anchor: keep the
-			// original baseline so the eventual disconnect reports the FULL session
-			// delta across the roam, not just the post-roam bytes. Either way the
-			// connect event itself carries no bytes (the delta is stamped at end).
-			if !roam {
-				ps.rxBaseline = lp.RxBytes
-				ps.txBaseline = lp.TxBytes
-			}
 			o.emitLocked(&nodev1.Event{
 				At:             timestamppb.New(now),
 				Type:           nodev1.EventType_EVENT_TYPE_PEER_CONNECTED,
 				Protocol:       nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 				PeerId:         pk,
 				SourceEndpoint: lp.Endpoint,
+				RxBytes:        int64(lp.RxBytes),
+				TxBytes:        int64(lp.TxBytes),
 			})
 		} else if freshHandshake {
 			ps.upEmitted = true
@@ -302,8 +271,9 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 
 		// A peer "disconnects" when a previously-live handshake ages past the
 		// stale threshold. Emit a HANDSHAKE_DOWN and a PEER_DISCONNECTED so the
-		// session is closed in the history. The disconnect carries the session's
-		// byte delta (current cumulative − baseline captured at connect).
+		// session is closed in the history. The disconnect carries the peer's RAW
+		// CUMULATIVE awg counters at this instant; the controller subtracts the
+		// cumulative it remembered at the matching connect to get the session delta.
 		if ps.upEmitted && !freshHandshake && !lp.LastHandshake.IsZero() && now.Sub(lp.LastHandshake) > o.stale {
 			ps.upEmitted = false
 			o.emitLocked(&nodev1.Event{
@@ -319,8 +289,8 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 				Protocol:       nodev1.Protocol_PROTOCOL_AMNEZIAWG,
 				PeerId:         pk,
 				SourceEndpoint: lp.Endpoint,
-				RxBytes:        sessionDelta(lp.RxBytes, ps.rxBaseline),
-				TxBytes:        sessionDelta(lp.TxBytes, ps.txBaseline),
+				RxBytes:        int64(lp.RxBytes),
+				TxBytes:        int64(lp.TxBytes),
 			})
 		}
 
@@ -328,8 +298,8 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 	}
 
 	// A peer removed from the config (no longer in the dump) disconnects too. It
-	// has no fresh dump line, so its session delta is computed against the last
-	// cumulative counter we saw for it.
+	// has no fresh dump line, so it carries the last cumulative counter we saw
+	// for it — the controller deltas that against the connect it remembered.
 	for pk, old := range o.prev {
 		if _, still := cur[pk]; !still {
 			ev := &nodev1.Event{
@@ -339,11 +309,11 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 				PeerId:         pk,
 				SourceEndpoint: old.endpoint,
 			}
-			// Only a peer that had an open session carries a byte delta; one that
-			// never connected has a zero baseline and a zero last counter anyway.
+			// Only a peer that had an open session reports its cumulative; one
+			// that never connected has a zero last counter anyway.
 			if old.upEmitted {
-				ev.RxBytes = sessionDelta(old.rxLast, old.rxBaseline)
-				ev.TxBytes = sessionDelta(old.txLast, old.txBaseline)
+				ev.RxBytes = int64(old.rxLast)
+				ev.TxBytes = int64(old.txLast)
 			}
 			o.emitLocked(ev)
 		}
@@ -398,10 +368,10 @@ func (o *Observer) emitShutdownDisconnects(now time.Time) {
 			PeerId:         pk,
 			SourceEndpoint: ps.endpoint,
 			Message:        "node-shutdown",
-			// Close the session's byte accounting from the last cumulative
-			// counters we polled (a graceful stop has no fresh dump).
-			RxBytes: sessionDelta(ps.rxLast, ps.rxBaseline),
-			TxBytes: sessionDelta(ps.txLast, ps.txBaseline),
+			// Report the last cumulative counters we polled (a graceful stop has
+			// no fresh dump); the controller deltas against the remembered connect.
+			RxBytes: int64(ps.rxLast),
+			TxBytes: int64(ps.txLast),
 		})
 		ps.upEmitted = false
 		o.prev[pk] = ps

@@ -380,12 +380,11 @@ message Event {
   // (the awg endpoint column). Empty when the peer has no current endpoint
   // ("(none)") or for non-peer events. Analytics derives the source IP from it.
   string source_endpoint = 6;
-  // rx_bytes and tx_bytes are the bytes transferred DURING the session this
-  // event closes — the session delta, not a cumulative counter. They are set
-  // on a PEER_DISCONNECTED (and the shutdown disconnects): the node captures
-  // the peer's cumulative awg counters as a baseline at PEER_CONNECTED and
-  // reports current−baseline here when the session ends. A PEER_CONNECTED (the
-  // session just started) carries 0. Other event types carry 0.
+  // rx_bytes and tx_bytes are, for peer connect/disconnect events, the peer's
+  // cumulative awg rx/tx counters at that instant (the controller computes
+  // per-session deltas by pairing connect→disconnect). They are set on both
+  // PEER_CONNECTED and PEER_DISCONNECTED (including the shutdown disconnects).
+  // Other event types carry 0.
   int64 rx_bytes = 7;
   int64 tx_bytes = 8;
 }
