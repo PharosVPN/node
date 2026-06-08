@@ -2092,8 +2092,16 @@ type Event struct {
 	// (the awg endpoint column). Empty when the peer has no current endpoint
 	// ("(none)") or for non-peer events. Analytics derives the source IP from it.
 	SourceEndpoint string `protobuf:"bytes,6,opt,name=source_endpoint,json=sourceEndpoint,proto3" json:"source_endpoint,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// rx_bytes and tx_bytes are the bytes transferred DURING the session this
+	// event closes — the session delta, not a cumulative counter. They are set
+	// on a PEER_DISCONNECTED (and the shutdown disconnects): the node captures
+	// the peer's cumulative awg counters as a baseline at PEER_CONNECTED and
+	// reports current−baseline here when the session ends. A PEER_CONNECTED (the
+	// session just started) carries 0. Other event types carry 0.
+	RxBytes       int64 `protobuf:"varint,7,opt,name=rx_bytes,json=rxBytes,proto3" json:"rx_bytes,omitempty"`
+	TxBytes       int64 `protobuf:"varint,8,opt,name=tx_bytes,json=txBytes,proto3" json:"tx_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Event) Reset() {
@@ -2166,6 +2174,20 @@ func (x *Event) GetSourceEndpoint() string {
 		return x.SourceEndpoint
 	}
 	return ""
+}
+
+func (x *Event) GetRxBytes() int64 {
+	if x != nil {
+		return x.RxBytes
+	}
+	return 0
+}
+
+func (x *Event) GetTxBytes() int64 {
+	if x != nil {
+		return x.TxBytes
+	}
+	return 0
 }
 
 var File_pharos_node_v1_control_proto protoreflect.FileDescriptor
@@ -2305,14 +2327,16 @@ const file_pharos_node_v1_control_proto_rawDesc = "" +
 	"\bprotocol\x18\x01 \x01(\x0e2\x18.pharos.node.v1.ProtocolR\bprotocol\"6\n" +
 	"\x16RestartServiceResponse\x12\x1c\n" +
 	"\trestarted\x18\x01 \x01(\bR\trestarted\"\x14\n" +
-	"\x12WatchEventsRequest\"\xf4\x01\n" +
+	"\x12WatchEventsRequest\"\xaa\x02\n" +
 	"\x05Event\x12*\n" +
 	"\x02at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12-\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x19.pharos.node.v1.EventTypeR\x04type\x124\n" +
 	"\bprotocol\x18\x03 \x01(\x0e2\x18.pharos.node.v1.ProtocolR\bprotocol\x12\x17\n" +
 	"\apeer_id\x18\x04 \x01(\tR\x06peerId\x12\x18\n" +
 	"\amessage\x18\x05 \x01(\tR\amessage\x12'\n" +
-	"\x0fsource_endpoint\x18\x06 \x01(\tR\x0esourceEndpoint*W\n" +
+	"\x0fsource_endpoint\x18\x06 \x01(\tR\x0esourceEndpoint\x12\x19\n" +
+	"\brx_bytes\x18\a \x01(\x03R\arxBytes\x12\x19\n" +
+	"\btx_bytes\x18\b \x01(\x03R\atxBytes*W\n" +
 	"\bProtocol\x12\x18\n" +
 	"\x14PROTOCOL_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12PROTOCOL_AMNEZIAWG\x10\x01\x12\x19\n" +

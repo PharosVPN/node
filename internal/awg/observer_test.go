@@ -354,6 +354,208 @@ func TestObserverSubscribeCancelClosesChannel(t *testing.T) {
 	cancel() // must not panic
 }
 
+// findType returns the first event of type t in evs, or nil.
+func findType(evs []*nodev1.Event, t nodev1.EventType) *nodev1.Event {
+	for _, e := range evs {
+		if e.GetType() == t {
+			return e
+		}
+	}
+	return nil
+}
+
+// TestObserverSessionDelta proves the disconnect that closes a stale session
+// carries the session's own byte delta: the cumulative counter at disconnect
+// minus the baseline captured at connect, NOT the raw cumulative. The connect
+// itself carries 0.
+func TestObserverSessionDelta(t *testing.T) {
+	o, rt, clock := newTestObserver(t)
+	// Baseline poll: peer already has lifetime traffic from a PRIOR session
+	// (1000/2000 cumulative) but is idle (no handshake yet this run).
+	rt.setLivePeer(LivePeer{PublicKey: "P=", RxBytes: 1000, TxBytes: 2000})
+	o.Poll(context.Background())
+
+	ch, cancel := o.Subscribe()
+	defer cancel()
+
+	// The session opens with a handshake; cumulative is still 1000/2000, so the
+	// baseline anchors there. The PEER_CONNECTED must carry 0 bytes.
+	*clock = (*clock).Add(10 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", Endpoint: "203.0.113.7:51820", LastHandshake: *clock, RxBytes: 1000, TxBytes: 2000})
+	o.Poll(context.Background())
+	connected := findType(drain(t, ch, 2), nodev1.EventType_EVENT_TYPE_PEER_CONNECTED)
+	if connected == nil {
+		t.Fatal("no PEER_CONNECTED")
+	}
+	if connected.GetRxBytes() != 0 || connected.GetTxBytes() != 0 {
+		t.Errorf("connect carried rx=%d tx=%d, want 0/0", connected.GetRxBytes(), connected.GetTxBytes())
+	}
+
+	// During the session the peer transfers 5000 rx / 9000 tx — cumulative rises
+	// to 6000 / 11000. Then the handshake goes stale and the session closes; the
+	// disconnect must report the DELTA 5000 / 9000, not the cumulative.
+	*clock = (*clock).Add(60 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", Endpoint: "203.0.113.7:51820", LastHandshake: (*clock).Add(-60 * time.Second), RxBytes: 6000, TxBytes: 11000})
+	o.Poll(context.Background())
+	disc := findType(drain(t, ch, 2), nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED)
+	if disc == nil {
+		t.Fatal("no PEER_DISCONNECTED")
+	}
+	if disc.GetRxBytes() != 5000 || disc.GetTxBytes() != 9000 {
+		t.Errorf("disconnect delta rx=%d tx=%d, want 5000/9000", disc.GetRxBytes(), disc.GetTxBytes())
+	}
+}
+
+// TestObserverSessionDeltaCounterReset proves the guard: when the current
+// cumulative is BELOW the session baseline (a WireGuard counter reset or a peer
+// re-add zeroes the counters), the disconnect reports the current counter, not
+// an underflowed wrap.
+func TestObserverSessionDeltaCounterReset(t *testing.T) {
+	o, rt, clock := newTestObserver(t)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", RxBytes: 10000, TxBytes: 20000})
+	o.Poll(context.Background())
+
+	ch, cancel := o.Subscribe()
+	defer cancel()
+
+	// Connect: baseline anchors at 10000/20000.
+	*clock = (*clock).Add(10 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", LastHandshake: *clock, RxBytes: 10000, TxBytes: 20000})
+	o.Poll(context.Background())
+	drain(t, ch, 2)
+
+	// Counters reset mid-session (peer re-added): cumulative drops to 700/300,
+	// below the baseline. The session delta must be the current value (700/300),
+	// never 10000-700 wrapped around uint64.
+	*clock = (*clock).Add(60 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", LastHandshake: (*clock).Add(-60 * time.Second), RxBytes: 700, TxBytes: 300})
+	o.Poll(context.Background())
+	disc := findType(drain(t, ch, 2), nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED)
+	if disc == nil {
+		t.Fatal("no PEER_DISCONNECTED")
+	}
+	if disc.GetRxBytes() != 700 || disc.GetTxBytes() != 300 {
+		t.Errorf("reset-guard delta rx=%d tx=%d, want 700/300 (current, not wrap)", disc.GetRxBytes(), disc.GetTxBytes())
+	}
+}
+
+// TestObserverSessionDeltaRoamResetsBaseline proves an endpoint roam opens a
+// new session segment: it re-anchors the baseline to the current cumulative, so
+// the disconnect that closes the post-roam segment reports only the bytes since
+// the roam, not since the original connect.
+func TestObserverSessionDeltaRoamResetsBaseline(t *testing.T) {
+	o, rt, clock := newTestObserver(t)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", RxBytes: 0, TxBytes: 0})
+	o.Poll(context.Background())
+
+	ch, cancel := o.Subscribe()
+	defer cancel()
+
+	// Connect from endpoint A; baseline anchors at 0/0.
+	*clock = (*clock).Add(10 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", Endpoint: "203.0.113.7:51820", LastHandshake: *clock, RxBytes: 0, TxBytes: 0})
+	o.Poll(context.Background())
+	drain(t, ch, 2)
+
+	// Roam: same peer, a fresh handshake from a NEW endpoint, cumulative now at
+	// 4000/8000. This emits a fresh PEER_CONNECTED and re-anchors the baseline.
+	*clock = (*clock).Add(30 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", Endpoint: "198.51.100.9:33333", LastHandshake: *clock, RxBytes: 4000, TxBytes: 8000})
+	o.Poll(context.Background())
+	roamConn := findType(drain(t, ch, 2), nodev1.EventType_EVENT_TYPE_PEER_CONNECTED)
+	if roamConn == nil {
+		t.Fatal("roam did not emit a fresh PEER_CONNECTED")
+	}
+	if roamConn.GetRxBytes() != 0 || roamConn.GetTxBytes() != 0 {
+		t.Errorf("roam connect carried rx=%d tx=%d, want 0/0", roamConn.GetRxBytes(), roamConn.GetTxBytes())
+	}
+
+	// Close the post-roam segment by going stale at cumulative 9000/18000. The
+	// delta must be measured from the ROAM baseline (4000/8000): 5000/10000,
+	// not from the original connect (which would be 9000/18000).
+	*clock = (*clock).Add(60 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", Endpoint: "198.51.100.9:33333", LastHandshake: (*clock).Add(-60 * time.Second), RxBytes: 9000, TxBytes: 18000})
+	o.Poll(context.Background())
+	disc := findType(drain(t, ch, 2), nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED)
+	if disc == nil {
+		t.Fatal("no PEER_DISCONNECTED after roam")
+	}
+	if disc.GetRxBytes() != 5000 || disc.GetTxBytes() != 10000 {
+		t.Errorf("post-roam delta rx=%d tx=%d, want 5000/10000 (since roam)", disc.GetRxBytes(), disc.GetTxBytes())
+	}
+}
+
+// TestObserverSessionDeltaOnConfigRemoval proves a peer removed from the config
+// (gone from the dump) closes its session with the delta against the last seen
+// cumulative counter.
+func TestObserverSessionDeltaOnConfigRemoval(t *testing.T) {
+	o, rt, clock := newTestObserver(t)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", RxBytes: 100, TxBytes: 200})
+	o.Poll(context.Background())
+
+	ch, cancel := o.Subscribe()
+	defer cancel()
+
+	// Connect; baseline anchors at 100/200.
+	*clock = (*clock).Add(10 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", LastHandshake: *clock, RxBytes: 100, TxBytes: 200})
+	o.Poll(context.Background())
+	drain(t, ch, 2)
+
+	// Poll once more so the observer records the last-seen cumulative (3100/4200)
+	// while the peer is still up but not stale.
+	*clock = (*clock).Add(5 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "P=", LastHandshake: (*clock).Add(-5 * time.Second), RxBytes: 3100, TxBytes: 4200})
+	o.Poll(context.Background())
+
+	// Remove the peer from the config entirely. The disconnect must report the
+	// delta against the last-seen cumulative: 3000/4000.
+	rt.mu.Lock()
+	delete(rt.live, "P=")
+	rt.mu.Unlock()
+	*clock = (*clock).Add(5 * time.Second)
+	o.Poll(context.Background())
+	disc := findType(drain(t, ch, 1), nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED)
+	if disc == nil {
+		t.Fatal("no PEER_DISCONNECTED on config removal")
+	}
+	if disc.GetRxBytes() != 3000 || disc.GetTxBytes() != 4000 {
+		t.Errorf("config-removal delta rx=%d tx=%d, want 3000/4000", disc.GetRxBytes(), disc.GetTxBytes())
+	}
+}
+
+// TestObserverSessionDeltaOnShutdown proves a graceful shutdown closes a live
+// session with its byte delta from the last-seen cumulative counters.
+func TestObserverSessionDeltaOnShutdown(t *testing.T) {
+	o, rt, clock := newTestObserver(t)
+	rt.setLivePeer(LivePeer{PublicKey: "LIVE=", RxBytes: 500, TxBytes: 600})
+	o.Poll(context.Background())
+
+	ch, cancel := o.Subscribe()
+	defer cancel()
+
+	// Connect; baseline 500/600.
+	*clock = (*clock).Add(10 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "LIVE=", Endpoint: "203.0.113.7:51820", LastHandshake: *clock, RxBytes: 500, TxBytes: 600})
+	o.Poll(context.Background())
+	drain(t, ch, 2)
+
+	// Transfer some traffic, observed by a poll (last-seen cumulative 8500/9600).
+	*clock = (*clock).Add(5 * time.Second)
+	rt.setLivePeer(LivePeer{PublicKey: "LIVE=", Endpoint: "203.0.113.7:51820", LastHandshake: (*clock).Add(-5 * time.Second), RxBytes: 8500, TxBytes: 9600})
+	o.Poll(context.Background())
+
+	// Graceful shutdown closes the session: delta must be 8000/9000.
+	o.emitShutdownDisconnects(*clock)
+	disc := findType(drain(t, ch, 1), nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED)
+	if disc == nil {
+		t.Fatal("no PEER_DISCONNECTED on shutdown")
+	}
+	if disc.GetRxBytes() != 8000 || disc.GetTxBytes() != 9000 {
+		t.Errorf("shutdown delta rx=%d tx=%d, want 8000/9000", disc.GetRxBytes(), disc.GetTxBytes())
+	}
+}
+
 // droppedEventsTotal sums per-subscriber drop counters; test-only.
 func (o *Observer) droppedEventsTotal() uint64 {
 	o.mu.Lock()
