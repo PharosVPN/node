@@ -65,10 +65,13 @@ type peerState struct {
 	// so a stale handshake emits a PEER_DISCONNECTED exactly once.
 	upEmitted bool
 	// rxBaseline and txBaseline are the peer's CUMULATIVE awg byte counters at
-	// the moment the current session opened (PEER_CONNECTED). The session's own
-	// rx/tx is the current cumulative minus this baseline; the observer stamps
-	// that delta on the PEER_DISCONNECTED that closes the session. An endpoint
-	// roam opens a new session segment, so it resets the baseline to current.
+	// the moment the current session opened (the FIRST PEER_CONNECTED). The
+	// session's own rx/tx is the current cumulative minus this baseline; the
+	// observer stamps that delta on the PEER_DISCONNECTED that closes the
+	// session. The baseline PERSISTS across endpoint roams: a roam emits a fresh
+	// PEER_CONNECTED (a real source-IP-change signal) but does NOT re-anchor the
+	// baseline, so the full session delta — bytes moved before AND after the
+	// roam — is reported once, at disconnect, attributed to the last endpoint.
 	rxBaseline uint64
 	txBaseline uint64
 	// rxLast and txLast are the most recent cumulative counters seen for this
@@ -272,15 +275,20 @@ func (o *Observer) detect(now time.Time, cur map[string]LivePeer) {
 		// session boundaries the history must record; emit on the TRANSITION
 		// only, never on every poll.
 		endpointChanged := was && ps.upEmitted && lp.Endpoint != "" && lp.Endpoint != old.endpoint
+		roam := endpointChanged && old.upEmitted
 		if (freshHandshake && !old.upEmitted) || endpointChanged {
 			ps.upEmitted = true
-			// A new session segment opens here: anchor the byte baseline to the
-			// peer's current cumulative counters so the closing disconnect
-			// reports only this session's traffic. On a roam this re-anchors,
-			// which (intentionally) closes the byte accounting for the previous
-			// segment at the roam boundary. The connect itself carries no bytes.
-			ps.rxBaseline = lp.RxBytes
-			ps.txBaseline = lp.TxBytes
+			// On a genuine NEW session (peer was not already up), anchor the byte
+			// baseline to the peer's current cumulative counters so the closing
+			// disconnect reports only this session's traffic. On a ROAM (peer was
+			// already up, just changed source endpoint) DO NOT re-anchor: keep the
+			// original baseline so the eventual disconnect reports the FULL session
+			// delta across the roam, not just the post-roam bytes. Either way the
+			// connect event itself carries no bytes (the delta is stamped at end).
+			if !roam {
+				ps.rxBaseline = lp.RxBytes
+				ps.txBaseline = lp.TxBytes
+			}
 			o.emitLocked(&nodev1.Event{
 				At:             timestamppb.New(now),
 				Type:           nodev1.EventType_EVENT_TYPE_PEER_CONNECTED,

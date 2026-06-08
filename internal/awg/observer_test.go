@@ -439,11 +439,14 @@ func TestObserverSessionDeltaCounterReset(t *testing.T) {
 	}
 }
 
-// TestObserverSessionDeltaRoamResetsBaseline proves an endpoint roam opens a
-// new session segment: it re-anchors the baseline to the current cumulative, so
-// the disconnect that closes the post-roam segment reports only the bytes since
-// the roam, not since the original connect.
-func TestObserverSessionDeltaRoamResetsBaseline(t *testing.T) {
+// TestObserverSessionDeltaAccumulatesAcrossRoam proves an endpoint roam does NOT
+// reset the byte baseline: bytes moved BEFORE the roam are carried forward so the
+// eventual disconnect reports the FULL session delta (pre- AND post-roam),
+// attributed to the last endpoint. The roam still emits a fresh PEER_CONNECTED
+// (a real source-IP-change signal) but carries 0 bytes. This mirrors the live
+// regression where a mid-session roam reset the baseline and a 20 MiB download
+// disconnected with only the post-roam tail of bytes.
+func TestObserverSessionDeltaAccumulatesAcrossRoam(t *testing.T) {
 	o, rt, clock := newTestObserver(t)
 	rt.setLivePeer(LivePeer{PublicKey: "P=", RxBytes: 0, TxBytes: 0})
 	o.Poll(context.Background())
@@ -457,31 +460,38 @@ func TestObserverSessionDeltaRoamResetsBaseline(t *testing.T) {
 	o.Poll(context.Background())
 	drain(t, ch, 2)
 
-	// Roam: same peer, a fresh handshake from a NEW endpoint, cumulative now at
-	// 4000/8000. This emits a fresh PEER_CONNECTED and re-anchors the baseline.
+	// Roam: same peer, a fresh handshake from a NEW endpoint, with ~21 MB already
+	// cumulative on the counters. This emits a fresh PEER_CONNECTED (the new
+	// source endpoint) but MUST NOT re-anchor the baseline and MUST carry 0 bytes.
+	const preRoamRx, preRoamTx = 21_000_000, 1_000_000
 	*clock = (*clock).Add(30 * time.Second)
-	rt.setLivePeer(LivePeer{PublicKey: "P=", Endpoint: "198.51.100.9:33333", LastHandshake: *clock, RxBytes: 4000, TxBytes: 8000})
+	rt.setLivePeer(LivePeer{PublicKey: "P=", Endpoint: "198.51.100.9:33333", LastHandshake: *clock, RxBytes: preRoamRx, TxBytes: preRoamTx})
 	o.Poll(context.Background())
 	roamConn := findType(drain(t, ch, 2), nodev1.EventType_EVENT_TYPE_PEER_CONNECTED)
 	if roamConn == nil {
 		t.Fatal("roam did not emit a fresh PEER_CONNECTED")
 	}
+	if roamConn.GetSourceEndpoint() != "198.51.100.9:33333" {
+		t.Errorf("roam connect source_endpoint = %q, want 198.51.100.9:33333", roamConn.GetSourceEndpoint())
+	}
 	if roamConn.GetRxBytes() != 0 || roamConn.GetTxBytes() != 0 {
 		t.Errorf("roam connect carried rx=%d tx=%d, want 0/0", roamConn.GetRxBytes(), roamConn.GetTxBytes())
 	}
 
-	// Close the post-roam segment by going stale at cumulative 9000/18000. The
-	// delta must be measured from the ROAM baseline (4000/8000): 5000/10000,
-	// not from the original connect (which would be 9000/18000).
+	// Close the session by going stale. The delta MUST be measured from the
+	// ORIGINAL connect baseline (0/0), so the full pre- and post-roam volume is
+	// reported — not just the post-roam tail.
+	const finalRx, finalTx = 22_000_000, 1_100_000
 	*clock = (*clock).Add(60 * time.Second)
-	rt.setLivePeer(LivePeer{PublicKey: "P=", Endpoint: "198.51.100.9:33333", LastHandshake: (*clock).Add(-60 * time.Second), RxBytes: 9000, TxBytes: 18000})
+	rt.setLivePeer(LivePeer{PublicKey: "P=", Endpoint: "198.51.100.9:33333", LastHandshake: (*clock).Add(-60 * time.Second), RxBytes: finalRx, TxBytes: finalTx})
 	o.Poll(context.Background())
 	disc := findType(drain(t, ch, 2), nodev1.EventType_EVENT_TYPE_PEER_DISCONNECTED)
 	if disc == nil {
 		t.Fatal("no PEER_DISCONNECTED after roam")
 	}
-	if disc.GetRxBytes() != 5000 || disc.GetTxBytes() != 10000 {
-		t.Errorf("post-roam delta rx=%d tx=%d, want 5000/10000 (since roam)", disc.GetRxBytes(), disc.GetTxBytes())
+	if disc.GetRxBytes() != finalRx || disc.GetTxBytes() != finalTx {
+		t.Errorf("full-session delta rx=%d tx=%d, want %d/%d (baseline 0/0 persists across roam)",
+			disc.GetRxBytes(), disc.GetTxBytes(), finalRx, finalTx)
 	}
 }
 
